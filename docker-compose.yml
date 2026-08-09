@@ -1,0 +1,48 @@
+services:
+  netpulse:
+    build:
+      context: .
+    container_name: netpulse
+    restart: unless-stopped
+    network_mode: host
+    user: "${PUID:-1000}:${PGID:-1000}"
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_RAW
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid
+    volumes:
+      - ./data:/data
+    environment:
+      DATA_DIR: /data
+      SAMPLE_INTERVAL_SECONDS: ${SAMPLE_INTERVAL_SECONDS:-2}
+      DISCOVERY_ENABLED: ${DISCOVERY_ENABLED:-true}
+      DISCOVERY_INTERVAL_SECONDS: ${DISCOVERY_INTERVAL_SECONDS:-120}
+      DEVICE_OFFLINE_AFTER_SECONDS: ${DEVICE_OFFLINE_AFTER_SECONDS:-90}
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+      TZ: ${TZ:-Asia/Tokyo}
+      NETWORK_SUBNET: ${NETWORK_SUBNET:-}
+      NETWORK_INTERFACE: ${NETWORK_INTERFACE:-}
+      GATEWAY_HOST: ${GATEWAY_HOST:-}
+      MONITORED_HOSTS: ${MONITORED_HOSTS:-}
+      CONNECTIVITY_ENABLED: ${CONNECTIVITY_ENABLED:-true}
+      CONNECTIVITY_INTERVAL_SECONDS: ${CONNECTIVITY_INTERVAL_SECONDS:-15}
+      INTERNET_TARGETS: ${INTERNET_TARGETS:-1.1.1.1,8.8.8.8}
+      DNS_SERVERS: ${DNS_SERVERS:-}
+      DNS_CHECK_NAME: ${DNS_CHECK_NAME:-example.com}
+      SNMP_ENABLED: ${SNMP_ENABLED:-false}
+      SNMP_TARGETS: ${SNMP_TARGETS:-}
+      SNMP_COMMUNITY: ${SNMP_COMMUNITY:-public}
+      SNMP_INTERVAL_SECONDS: ${SNMP_INTERVAL_SECONDS:-30}
+      SNMP_INTERFACE_INDEX: ${SNMP_INTERFACE_INDEX:-2}
+      SNMP_EXTRA_OIDS: ${SNMP_EXTRA_OIDS:-}
+      AGENT_TOKEN: ${AGENT_TOKEN:-}
+      AGENT_OFFLINE_AFTER_SECONDS: ${AGENT_OFFLINE_AFTER_SECONDS:-60}
+      ANOMALY_ENABLED: ${ANOMALY_ENABLED:-true}
+      ANOMALY_INTERVAL_SECONDS: ${ANOMALY_INTERVAL_SECONDS:-30}
+      ANOMALY_MIN_SAMPLES: ${ANOMALY_MIN_SAMPLES:-20}
+      DEMO_MODE: ${DEMO_MODE:-false}
+    security_opt:
+      - no-new-privileges:true

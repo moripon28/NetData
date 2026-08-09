@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07110f">
+  <meta name="description" content="NetPulse — 自宅ネットワークのリアルタイム・オブザーバビリティ画面">
+  <title>NetPulse // Home Network Observatory</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="noise" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/" aria-label="NetPulse ホーム">
+      <span class="brand-mark"><i></i><i></i><i></i></span>
+      <span><strong>NETPULSE</strong><small>HOME NETWORK OBSERVATORY</small></span>
+    </a>
+    <div class="topbar-status">
+      <div class="live-pill" id="connectionPill"><span></span><b>CONNECTING</b></div>
+      <time id="clock">--:--:--</time>
+    </div>
+  </header>
+
+  <main class="dashboard">
+    <section class="intro">
+      <div>
+        <p class="eyebrow">LIVE NETWORK TELEMETRY</p>
+        <h1>家じゅうの通信を、<br><em>ひとつの鼓動</em>として見る。</h1>
+      </div>
+      <p class="intro-copy">接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。</p>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="panel topology-panel">
+        <header class="panel-head">
+          <div><span class="panel-index">01</span><h2>NETWORK CONSTELLATION</h2></div>
+          <span class="subnet-label" id="subnetLabel">SUBNET · DETECTING</span>
+        </header>
+        <div class="topology-stage">
+          <canvas id="topologyCanvas" aria-label="ネットワーク端末の接続図"></canvas>
+          <div class="topology-center-label">
+            <small>GATEWAY</small>
+            <strong id="gatewayLabel">—</strong>
+            <span><i></i><b id="gatewayLatency">-- ms</b></span>
+          </div>
+          <div class="topology-legend"><span><i class="dot-online"></i>ONLINE</span><span><i class="dot-offline"></i>OFFLINE</span><span><i class="dot-flow"></i>DATA FLOW</span></div>
+        </div>
+      </article>
+
+      <aside class="panel health-panel">
+        <header class="panel-head">
+          <div><span class="panel-index">02</span><h2>NETWORK VITALS</h2></div>
+        </header>
+        <div class="health-wrap">
+          <div class="health-orbit">
+            <svg class="health-ring" viewBox="0 0 160 160" role="img" aria-label="ネットワーク健全性スコア">
+              <circle class="ring-track" cx="80" cy="80" r="66"></circle>
+              <circle class="ring-value" id="healthRing" cx="80" cy="80" r="66"></circle>
+            </svg>
+            <div class="health-value"><strong id="healthScore">--</strong><small>HEALTH</small></div>
+          </div>
+          <p class="health-message" id="healthMessage">テレメトリを取得しています…</p>
+        </div>
+        <div class="vital-list">
+          <div class="vital-item"><span>ONLINE DEVICES</span><strong><b id="onlineDevices">0</b><small id="totalDevices"> / 0</small></strong></div>
+          <div class="vital-item"><span>PACKET LOSS</span><strong id="packetLoss">0.0%</strong></div>
+          <div class="vital-item"><span>INTERFACE</span><strong id="interfaceName">—</strong></div>
+          <div class="vital-item"><span>UPTIME</span><strong id="uptime">—</strong></div>
+        </div>
+      </aside>
+
+      <article class="panel traffic-panel">
+        <header class="panel-head">
+          <div><span class="panel-index">03</span><h2>TRAFFIC STREAM</h2></div>
+          <div class="traffic-values">
+            <span class="download"><i>↓</i><b id="downloadRate">0 bps</b></span>
+            <span class="upload"><i>↑</i><b id="uploadRate">0 bps</b></span>
+          </div>
+        </header>
+        <div class="chart-wrap"><canvas id="trafficCanvas" aria-label="直近の受信・送信速度グラフ"></canvas></div>
+        <div class="chart-axis"><span>60 SEC AGO</span><span>NOW</span></div>
+      </article>
+
+      <article class="panel system-panel">
+        <header class="panel-head">
+          <div><span class="panel-index">04</span><h2>PI SYSTEM PULSE</h2></div>
+          <span class="temperature"><i>●</i><b id="temperature">--°C</b></span>
+        </header>
+        <div class="system-metrics">
+          <div class="system-metric" data-metric="cpu">
+            <div class="metric-top"><span>CPU</span><strong id="cpuValue">0%</strong></div>
+            <div class="bar"><i id="cpuBar"></i></div><small id="cpuDetail">LOAD —</small>
+          </div>
+          <div class="system-metric" data-metric="memory">
+            <div class="metric-top"><span>MEMORY</span><strong id="memoryValue">0%</strong></div>
+            <div class="bar"><i id="memoryBar"></i></div><small id="memoryDetail">— / —</small>
+          </div>
+          <div class="system-metric" data-metric="disk">
+            <div class="metric-top"><span>STORAGE</span><strong id="diskValue">0%</strong></div>
+            <div class="bar"><i id="diskBar"></i></div><small id="diskDetail">— / —</small>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel horizon-panel">
+        <header class="panel-head">
+          <div><span class="panel-index">05</span><h2>EXTENDED HORIZON</h2></div>
+          <span class="subnet-label">DNS · SNMP · AGENTS · BEHAVIOR</span>
+        </header>
+        <div class="horizon-grid">
+          <section class="horizon-card connectivity-card">
+            <div class="horizon-title"><span class="horizon-icon">◎</span><div><small>OUTSIDE WORLD</small><h3>CONNECTIVITY</h3></div><b class="mini-status checking" id="connectivityStatus">CHECKING</b></div>
+            <div class="horizon-values"><div><span>INTERNET</span><strong id="internetLatency">—</strong></div><div><span>DNS</span><strong id="dnsLatency">—</strong></div></div>
+            <p id="connectivityDetail">外部到達性を確認しています…</p>
+          </section>
+          <section class="horizon-card snmp-card">
+            <div class="horizon-title"><span class="horizon-icon">⌁</span><div><small>ROUTER TELEMETRY</small><h3>SNMP</h3></div><b class="mini-status disabled" id="snmpStatus">DISABLED</b></div>
+            <div class="horizon-values"><div><span>WAN DOWN</span><strong id="snmpDown">—</strong></div><div><span>WAN UP</span><strong id="snmpUp">—</strong></div></div>
+            <p id="snmpDetail">ルーターのSNMP設定を待っています。</p>
+          </section>
+          <section class="horizon-card agents-card">
+            <div class="horizon-title"><span class="horizon-icon">▣</span><div><small>HOST TELEMETRY</small><h3>AGENT FLEET</h3></div><b class="mini-status" id="agentCount">0 / 0</b></div>
+            <div class="agent-node-list" id="agentNodes"><span class="agent-empty">Windows/Linuxエージェントを待っています。</span></div>
+            <p id="agentDetail">署名付きハートビートで端末内部を観測します。</p>
+          </section>
+          <section class="horizon-card anomaly-card">
+            <div class="horizon-title"><span class="horizon-icon">⌁</span><div><small>BEHAVIOR MODEL</small><h3>ANOMALY RADAR</h3></div><b class="mini-status learning" id="anomalyStatus">LEARNING</b></div>
+            <div class="learning-track"><i id="learningBar"></i></div>
+            <div class="anomaly-copy"><strong id="learningProgress">0%</strong><span id="anomalyDetail">この時間帯の通常パターンを学習中です。</span></div>
+          </section>
+        </div>
+      </article>
+
+      <article class="panel devices-panel">
+        <header class="panel-head devices-head">
+          <div><span class="panel-index">06</span><h2>CONNECTED UNIVERSE</h2></div>
+          <div class="device-controls">
+            <label class="search"><span>⌕</span><input id="deviceSearch" type="search" placeholder="端末を検索" aria-label="端末を検索"></label>
+            <button class="filter active" data-filter="all">ALL</button>
+            <button class="filter" data-filter="online">ONLINE</button>
+            <button class="filter" data-filter="unknown">UNKNOWN</button>
+          </div>
+        </header>
+        <div class="device-table-wrap">
+          <table>
+            <thead><tr><th>DEVICE</th><th>ADDRESS</th><th>TYPE</th><th>LATENCY</th><th>LAST SEEN</th><th>STATUS</th></tr></thead>
+            <tbody id="deviceRows"><tr class="empty-row"><td colspan="6">端末を検出しています…</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel events-panel">
+        <header class="panel-head">
+          <div><span class="panel-index">07</span><h2>SIGNAL LOG</h2></div>
+          <span class="event-count" id="eventCount">0 EVENTS</span>
+        </header>
+        <div class="event-list" id="eventList"><p class="empty-events">イベントを待っています…</p></div>
+      </article>
+    </section>
+  </main>
+
+  <footer><span>NETPULSE / RP5 NODE</span><span>LOCAL FIRST · YOUR DATA STAYS HOME</span><a href="/docs">API DOCS ↗</a></footer>
+
+  <dialog id="deviceDialog">
+    <form method="dialog" id="deviceForm">
+      <div class="dialog-head"><div><small>DEVICE PROFILE</small><h2 id="dialogIp">—</h2></div><button value="cancel" aria-label="閉じる">×</button></div>
+      <label>表示名<input id="dialogName" maxlength="80" placeholder="例: リビングのテレビ"></label>
+      <label>種類<select id="dialogType"><option value="unknown">Unknown</option><option value="router">Router</option><option value="computer">Computer</option><option value="phone">Phone</option><option value="tablet">Tablet</option><option value="tv">TV</option><option value="iot">IoT</option><option value="server">Server / NAS</option><option value="printer">Printer</option><option value="camera">Camera</option><option value="game">Game console</option></select></label>
+      <label class="trust-toggle"><input id="dialogTrusted" type="checkbox"><span></span>信頼済みの端末として登録</label>
+      <div class="dialog-actions"><button value="cancel" class="cancel">CANCEL</button><button type="submit" value="default" class="save">SAVE PROFILE</button></div>
+    </form>
+  </dialog>
+
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
