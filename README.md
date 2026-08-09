@@ -133,7 +133,11 @@ APIキーは通常のLM Studioでは不要です。入力した場合もAPIレ�
 
 ## Windows/Linuxエージェント
 
-サーバーの `.env` に32バイト以上のランダムな `AGENT_TOKEN` を設定します。各端末へ `agent` フォルダーをコピーし、[agent/README.md](agent/README.md) の手順でインストールします。トークン本体は送信せず、リクエスト本文をHMAC-SHA256で署名します。
+サーバーの `.env` に32バイト以上のランダムな `AGENT_TOKEN` を設定します。例えばRaspberry Pi上で `openssl rand -hex 32` を実行して生成できます。設定後はNetPulseを再作成してください。
+
+画面の `AGENT FLEET` にある `EASY SETUP` を開き、監視端末でWindowsまたはLinuxのコマンドを管理者権限で実行します。必要ファイルはNetPulseから自動取得されるため、`agent` フォルダーのコピーや実行場所の移動は不要です。詳しい手順とオフライン用手順は [agent/README.md](agent/README.md) にあります。
+
+登録トークンは実行時に非表示で入力し、コマンドや画面には埋め込みません。トークン本体はハートビートでも送信せず、リクエスト本文をHMAC-SHA256で署名します。
 
 ## SQLiteで問題ない理由
 

@@ -126,6 +126,7 @@
             <div class="horizon-title"><span class="horizon-icon">▣</span><div><small>HOST TELEMETRY</small><h3>AGENT FLEET</h3></div><b class="mini-status" id="agentCount">0 / 0</b></div>
             <div class="agent-node-list" id="agentNodes"><span class="agent-empty">Windows/Linuxエージェントを待っています。</span></div>
             <p id="agentDetail">署名付きハートビートで端末内部を観測します。</p>
+            <button class="agent-setup-button" id="agentSetupButton" type="button">EASY SETUP</button>
           </section>
           <section class="horizon-card anomaly-card">
             <div class="horizon-title"><span class="horizon-icon">⌁</span><div><small>BEHAVIOR MODEL</small><h3>ANOMALY RADAR</h3></div><b class="mini-status learning" id="anomalyStatus">LEARNING</b></div>
@@ -190,6 +191,24 @@
       <label>種類<select id="dialogType"><option value="unknown">Unknown</option><option value="router">Router</option><option value="computer">Computer</option><option value="phone">Phone</option><option value="tablet">Tablet</option><option value="tv">TV</option><option value="iot">IoT</option><option value="server">Server / NAS</option><option value="printer">Printer</option><option value="camera">Camera</option><option value="game">Game console</option></select></label>
       <label class="trust-toggle"><input id="dialogTrusted" type="checkbox"><span></span>信頼済みの端末として登録</label>
       <div class="dialog-actions"><button value="cancel" class="cancel">CANCEL</button><button type="submit" value="default" class="save">SAVE PROFILE</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="agentSetupDialog" class="settings-dialog agent-setup-dialog">
+    <form method="dialog" class="agent-setup-form">
+      <div class="dialog-head"><div><small>HOST AGENT SETUP</small><h2>監視エージェントを追加</h2></div><button id="agentSetupClose" value="cancel" aria-label="閉じる">×</button></div>
+      <p class="form-hint">監視したい端末で、OSに合うコマンドを管理者権限で実行します。ファイルの手動コピーや実行場所の移動は不要です。</p>
+      <p class="agent-token-status" id="agentSetupTokenStatus" role="status">登録トークンの設定を確認しています…</p>
+      <section class="agent-command-section">
+        <header><div><strong>Windows</strong><span>管理者として開いたPowerShell</span></div><button class="agent-copy-button" type="button" data-copy-target="windowsInstallCommand">COPY</button></header>
+        <code id="windowsInstallCommand"></code>
+      </section>
+      <section class="agent-command-section">
+        <header><div><strong>Linux</strong><span>sudo可能なターミナル</span></div><button class="agent-copy-button" type="button" data-copy-target="linuxInstallCommand">COPY</button></header>
+        <code id="linuxInstallCommand"></code>
+      </section>
+      <p class="form-hint">実行中に求められる登録トークンには、Raspberry Pi上の <code>AGENT_TOKEN</code> を入力します。トークンは画面やコマンドには埋め込みません。</p>
+      <div class="dialog-actions"><button value="cancel" class="cancel">CLOSE</button></div>
     </form>
   </dialog>
 

@@ -18,7 +18,10 @@
     connectivityStatus: $("connectivityStatus"), internetLatency: $("internetLatency"), dnsLatency: $("dnsLatency"),
     connectivityDetail: $("connectivityDetail"), snmpStatus: $("snmpStatus"), snmpDown: $("snmpDown"),
     snmpUp: $("snmpUp"), snmpDetail: $("snmpDetail"), agentCount: $("agentCount"), agentNodes: $("agentNodes"),
-    agentDetail: $("agentDetail"), anomalyStatus: $("anomalyStatus"), learningBar: $("learningBar"),
+    agentDetail: $("agentDetail"), agentSetupButton: $("agentSetupButton"), agentSetupDialog: $("agentSetupDialog"),
+    agentSetupClose: $("agentSetupClose"), agentSetupTokenStatus: $("agentSetupTokenStatus"),
+    windowsInstallCommand: $("windowsInstallCommand"), linuxInstallCommand: $("linuxInstallCommand"),
+    anomalyStatus: $("anomalyStatus"), learningBar: $("learningBar"),
     learningProgress: $("learningProgress"), anomalyDetail: $("anomalyDetail"),
     llmSettingsButton: $("llmSettingsButton"), llmRunButton: $("llmRunButton"),
     llmReportHistory: $("llmReportHistory"), llmReportStatus: $("llmReportStatus"),
@@ -264,6 +267,10 @@
       elements.agentNodes.innerHTML = '<span class="agent-empty">Windows/Linuxエージェントを待っています。</span>';
       elements.agentDetail.textContent = agents.configured ? "登録トークンは準備済みです。" : "サーバー側の登録トークンが未設定です。";
     }
+    elements.agentSetupTokenStatus.textContent = agents.configured
+      ? "登録トークンはサーバー側で設定済みです。実行時に値を1回入力します。"
+      : "先にRaspberry Pi上の .env に32文字以上の AGENT_TOKEN を設定し、NetPulseを再作成してください。";
+    elements.agentSetupTokenStatus.classList.toggle("warning", !agents.configured);
 
     const insights = snapshot.insights || { status: "learning", learning_progress: 0, active: [] };
     setMiniStatus(elements.anomalyStatus, insights.status);
@@ -407,12 +414,43 @@
     elements.dialog.showModal();
   }
 
+  function openAgentSetup() {
+    const server = window.location.origin.replace(/\/$/, "");
+    elements.windowsInstallCommand.textContent = `$u='${server}'; $p=Join-Path $env:TEMP 'netpulse-install.ps1'; Invoke-WebRequest "$u/agent/install-windows.ps1" -OutFile $p; powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p -Server $u`;
+    elements.linuxInstallCommand.textContent = `curl -fsSL '${server}/agent/install-linux.sh' -o /tmp/netpulse-install.sh && sudo sh /tmp/netpulse-install.sh '${server}'`;
+    elements.agentSetupDialog.showModal();
+  }
+
+  async function copyAgentCommand(button) {
+    const target = $(button.dataset.copyTarget);
+    if (!target) return;
+    const command = target.textContent;
+    try {
+      if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(command);
+    } catch (_error) {
+      const textarea = document.createElement("textarea");
+      textarea.value = command;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.appendChild(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+    button.textContent = "COPIED";
+    window.setTimeout(() => { button.textContent = "COPY"; }, 1200);
+  }
+
   elements.search.addEventListener("input", (event) => { state.search = event.target.value; renderDevices(); });
   document.querySelectorAll(".filter").forEach((button) => button.addEventListener("click", () => {
     document.querySelectorAll(".filter").forEach((item) => item.classList.remove("active"));
     button.classList.add("active"); state.filter = button.dataset.filter; renderDevices();
   }));
   elements.deviceRows.addEventListener("click", (event) => { const row = event.target.closest("tr[data-ip]"); if (row) openDevice(row.dataset.ip); });
+  elements.agentSetupButton.addEventListener("click", openAgentSetup);
+  document.querySelectorAll(".agent-copy-button").forEach((button) => button.addEventListener("click", () => copyAgentCommand(button)));
   elements.form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!state.selectedIp) return;

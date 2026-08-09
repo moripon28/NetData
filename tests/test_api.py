@@ -26,10 +26,31 @@ def test_health_snapshot_and_static_ui(tmp_path):
         index = client.get("/")
         assert index.status_code == 200
         assert "NETPULSE" in index.text
+        assert "EASY SETUP" in index.text
 
         metrics = client.get("/metrics")
         assert metrics.status_code == 200
         assert "netpulse_health_score" in metrics.text
+
+
+def test_agent_install_files_are_available_without_exposing_other_files(tmp_path):
+    settings = Settings(data_dir=tmp_path, collector_enabled=False, discovery_enabled=False)
+    app = create_app(settings)
+    expected = {
+        "install-windows.ps1": "NetPulseAgent",
+        "install-linux.sh": "netpulse-agent.service",
+        "netpulse_agent.py": "/api/v1/agent/heartbeat",
+        "requirements.txt": "psutil",
+    }
+    with TestClient(app) as client:
+        for filename, marker in expected.items():
+            response = client.get(f"/agent/{filename}")
+            assert response.status_code == 200
+            assert marker in response.text
+            assert response.headers["cache-control"] == "no-cache"
+            assert response.headers["x-content-type-options"] == "nosniff"
+
+        assert client.get("/agent/README.md").status_code == 404
 
 
 def test_demo_mode_produces_devices(tmp_path):

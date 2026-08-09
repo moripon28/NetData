@@ -20,6 +20,13 @@ from app.service import MonitorService
 
 
 STATIC_DIR = Path(__file__).parent / "static"
+AGENT_DIR = Path(__file__).parent.parent / "agent"
+AGENT_DOWNLOADS = {
+    "install-windows.ps1": "text/plain; charset=utf-8",
+    "install-linux.sh": "text/plain; charset=utf-8",
+    "netpulse_agent.py": "text/x-python; charset=utf-8",
+    "requirements.txt": "text/plain; charset=utf-8",
+}
 
 
 class DeviceUpdate(BaseModel):
@@ -270,6 +277,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 await websocket.receive_text()
         except WebSocketDisconnect:
             hub.disconnect(websocket)
+
+    @app.get("/agent/{filename}", include_in_schema=False)
+    async def download_agent_file(filename: str) -> FileResponse:
+        media_type = AGENT_DOWNLOADS.get(filename)
+        path = AGENT_DIR / filename
+        if media_type is None or not path.is_file():
+            raise HTTPException(status_code=404, detail="Agent download not found")
+        return FileResponse(
+            path,
+            media_type=media_type,
+            headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"},
+        )
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

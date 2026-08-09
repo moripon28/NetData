@@ -13,7 +13,8 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-RUN chmod -R a+rX /app/app \
+COPY agent ./agent
+RUN chmod -R a+rX /app/app /app/agent \
     && mkdir -p /data
 
 EXPOSE 39080
