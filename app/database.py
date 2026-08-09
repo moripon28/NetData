@@ -108,14 +108,47 @@ class Database:
                 PRIMARY KEY(metric, hour_bucket)
             );
 
+            CREATE TABLE IF NOT EXISTS llm_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                enabled INTEGER NOT NULL DEFAULT 0,
+                base_url TEXT NOT NULL DEFAULT '',
+                model TEXT NOT NULL DEFAULT '',
+                system_prompt TEXT NOT NULL DEFAULT '',
+                interval_minutes INTEGER NOT NULL DEFAULT 60,
+                lookback_minutes INTEGER NOT NULL DEFAULT 60,
+                api_key_encrypted TEXT NOT NULL DEFAULT '',
+                updated_at REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS llm_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at REAL NOT NULL,
+                period_start REAL NOT NULL,
+                period_end REAL NOT NULL,
+                model TEXT NOT NULL,
+                status TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                error TEXT NOT NULL DEFAULT '',
+                context TEXT NOT NULL DEFAULT '{}'
+            );
+
             CREATE INDEX IF NOT EXISTS idx_samples_ts ON samples(ts);
             CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts DESC);
             CREATE INDEX IF NOT EXISTS idx_devices_last_seen ON devices(last_seen DESC);
             CREATE INDEX IF NOT EXISTS idx_connectivity_ts ON connectivity_checks(ts DESC);
             CREATE INDEX IF NOT EXISTS idx_snmp_ts ON snmp_samples(ts DESC);
             CREATE INDEX IF NOT EXISTS idx_agents_seen ON agent_nodes(last_seen DESC);
+            CREATE INDEX IF NOT EXISTS idx_llm_reports_created ON llm_reports(created_at DESC);
             """
         )
+        llm_columns = {
+            row["name"]
+            for row in await (await self._connection.execute("PRAGMA table_info(llm_settings)")).fetchall()
+        }
+        if "system_prompt" not in llm_columns:
+            await self._connection.execute(
+                "ALTER TABLE llm_settings ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''"
+            )
         await self._connection.commit()
 
     async def close(self) -> None:
@@ -242,6 +275,52 @@ class Database:
                 row["metadata"] = {}
         return rows
 
+    async def events_since(self, since: float, limit: int = 50) -> list[dict[str, Any]]:
+        cursor = await self._db().execute(
+            "SELECT * FROM events WHERE ts >= ? ORDER BY ts DESC LIMIT ?",
+            (since, max(1, min(limit, 200))),
+        )
+        rows = [dict(row) for row in await cursor.fetchall()]
+        for row in rows:
+            try:
+                row["metadata"] = json.loads(row["metadata"])
+            except json.JSONDecodeError:
+                row["metadata"] = {}
+        return rows
+
+    async def sample_statistics(self, minutes: int) -> dict[str, Any]:
+        since = time.time() - max(1, minutes) * 60
+        metric_columns = (
+            "cpu_percent", "memory_percent", "disk_percent", "temperature_c", "rx_bps",
+            "tx_bps", "gateway_latency_ms", "packet_loss_percent", "online_devices", "total_devices",
+        )
+        select_parts = ["COUNT(*) AS sample_count", "MIN(ts) AS first_sample_at", "MAX(ts) AS last_sample_at"]
+        for column in metric_columns:
+            select_parts.extend(
+                (f"AVG({column}) AS {column}_avg", f"MIN({column}) AS {column}_min", f"MAX({column}) AS {column}_max")
+            )
+        cursor = await self._db().execute(
+            f"SELECT {', '.join(select_parts)} FROM samples WHERE ts >= ?", (since,)
+        )
+        row = dict(await cursor.fetchone())
+        return row
+
+    async def connectivity_statistics(self, minutes: int) -> list[dict[str, Any]]:
+        since = time.time() - max(1, minutes) * 60
+        cursor = await self._db().execute(
+            """
+            SELECT check_type, COUNT(*) AS checks, SUM(success) AS successful,
+                   AVG(CASE WHEN success = 1 THEN latency_ms END) AS latency_ms_avg,
+                   MAX(CASE WHEN success = 1 THEN latency_ms END) AS latency_ms_max
+            FROM connectivity_checks
+            WHERE ts >= ?
+            GROUP BY check_type
+            ORDER BY check_type
+            """,
+            (since,),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
     async def save_connectivity_checks(self, checks: list[dict[str, Any]]) -> None:
         if not checks:
             return
@@ -290,6 +369,22 @@ class Database:
             "SELECT * FROM snmp_samples WHERE ts >= ? ORDER BY ts DESC LIMIT ?", (since, limit)
         )
         return [dict(row) for row in reversed(await cursor.fetchall())]
+
+    async def snmp_statistics(self, minutes: int) -> list[dict[str, Any]]:
+        since = time.time() - max(1, minutes) * 60
+        cursor = await self._db().execute(
+            """
+            SELECT target, metric, COUNT(*) AS samples, AVG(value) AS value_avg,
+                   MIN(value) AS value_min, MAX(value) AS value_max, MAX(unit) AS unit
+            FROM snmp_samples
+            WHERE ts >= ?
+            GROUP BY target, metric
+            ORDER BY target, metric
+            LIMIT 500
+            """,
+            (since,),
+        )
+        return [dict(row) for row in await cursor.fetchall()]
 
     async def upsert_agent(self, payload: dict[str, Any], source_ip: str) -> None:
         now = time.time()
@@ -370,10 +465,99 @@ class Database:
         )
         return {row["metric"]: int(row["sample_count"]) for row in await cursor.fetchall()}
 
+    async def ensure_llm_settings(self, defaults: dict[str, Any]) -> None:
+        await self._db().execute(
+            """
+            INSERT OR IGNORE INTO llm_settings (
+                id, enabled, base_url, model, system_prompt, interval_minutes, lookback_minutes,
+                api_key_encrypted, updated_at
+            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(bool(defaults.get("enabled"))), defaults.get("base_url", ""), defaults.get("model", ""),
+                defaults.get("system_prompt", ""),
+                int(defaults.get("interval_minutes", 60)), int(defaults.get("lookback_minutes", 60)),
+                defaults.get("api_key_encrypted", ""), time.time(),
+            ),
+        )
+        await self._db().commit()
+
+    async def llm_settings(self) -> dict[str, Any]:
+        cursor = await self._db().execute("SELECT * FROM llm_settings WHERE id = 1")
+        row = await cursor.fetchone()
+        if row is None:
+            raise RuntimeError("LLM settings have not been initialized")
+        values = dict(row)
+        values["enabled"] = bool(values["enabled"])
+        return values
+
+    async def update_llm_settings(self, values: dict[str, Any]) -> dict[str, Any]:
+        allowed = {
+            "enabled", "base_url", "model", "system_prompt", "interval_minutes", "lookback_minutes",
+            "api_key_encrypted",
+        }
+        updates = {key: value for key, value in values.items() if key in allowed}
+        if not updates:
+            return await self.llm_settings()
+        updates["updated_at"] = time.time()
+        columns = ", ".join(f"{key} = ?" for key in updates)
+        params = [int(value) if key == "enabled" else value for key, value in updates.items()]
+        async with self._lock:
+            await self._db().execute(f"UPDATE llm_settings SET {columns} WHERE id = 1", params)
+            await self._db().commit()
+        return await self.llm_settings()
+
+    async def save_llm_report(
+        self,
+        *,
+        period_start: float,
+        period_end: float,
+        model: str,
+        status: str,
+        content: str = "",
+        error: str = "",
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        cursor = await self._db().execute(
+            """
+            INSERT INTO llm_reports (
+                created_at, period_start, period_end, model, status, content, error, context
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                time.time(), period_start, period_end, model, status, content, error,
+                json.dumps(context or {}, ensure_ascii=False),
+            ),
+        )
+        await self._db().commit()
+        report_id = cursor.lastrowid
+        row_cursor = await self._db().execute("SELECT * FROM llm_reports WHERE id = ?", (report_id,))
+        return self._decode_llm_report(dict(await row_cursor.fetchone()))
+
+    async def llm_reports(self, limit: int = 10) -> list[dict[str, Any]]:
+        cursor = await self._db().execute(
+            "SELECT * FROM llm_reports ORDER BY created_at DESC LIMIT ?", (max(1, min(limit, 100)),)
+        )
+        return [self._decode_llm_report(dict(row)) for row in await cursor.fetchall()]
+
+    async def last_llm_report_at(self) -> float | None:
+        cursor = await self._db().execute("SELECT MAX(created_at) AS created_at FROM llm_reports")
+        row = await cursor.fetchone()
+        return float(row["created_at"]) if row and row["created_at"] is not None else None
+
+    @staticmethod
+    def _decode_llm_report(row: dict[str, Any]) -> dict[str, Any]:
+        try:
+            row["context"] = json.loads(row.get("context", "{}"))
+        except json.JSONDecodeError:
+            row["context"] = {}
+        return row
+
     async def cleanup(self, retention_days: int) -> None:
         cutoff = time.time() - retention_days * 86400
         await self._db().execute("DELETE FROM samples WHERE ts < ?", (cutoff,))
         await self._db().execute("DELETE FROM events WHERE ts < ?", (cutoff,))
         await self._db().execute("DELETE FROM connectivity_checks WHERE ts < ?", (cutoff,))
         await self._db().execute("DELETE FROM snmp_samples WHERE ts < ?", (cutoff,))
+        await self._db().execute("DELETE FROM llm_reports WHERE created_at < ?", (cutoff,))
         await self._db().commit()

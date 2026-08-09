@@ -20,11 +20,21 @@
     snmpUp: $("snmpUp"), snmpDetail: $("snmpDetail"), agentCount: $("agentCount"), agentNodes: $("agentNodes"),
     agentDetail: $("agentDetail"), anomalyStatus: $("anomalyStatus"), learningBar: $("learningBar"),
     learningProgress: $("learningProgress"), anomalyDetail: $("anomalyDetail"),
+    llmSettingsButton: $("llmSettingsButton"), llmRunButton: $("llmRunButton"),
+    llmReportHistory: $("llmReportHistory"), llmReportStatus: $("llmReportStatus"),
+    llmReportTime: $("llmReportTime"), llmReportModel: $("llmReportModel"), llmReportContent: $("llmReportContent"),
+    llmSettingsDialog: $("llmSettingsDialog"), llmSettingsForm: $("llmSettingsForm"),
+    llmSettingsClose: $("llmSettingsClose"), llmSettingsCancel: $("llmSettingsCancel"),
+    llmEnabled: $("llmEnabled"), llmBaseUrl: $("llmBaseUrl"), llmModel: $("llmModel"),
+    llmSystemPrompt: $("llmSystemPrompt"),
+    llmModelOptions: $("llmModelOptions"), llmLoadModels: $("llmLoadModels"),
+    llmInterval: $("llmInterval"), llmLookback: $("llmLookback"), llmApiKey: $("llmApiKey"),
+    llmClearApiKey: $("llmClearApiKey"), llmSettingsStatus: $("llmSettingsStatus"),
   };
 
   const state = {
     snapshot: null, devices: [], rx: [], tx: [], filter: "all", search: "", selectedIp: null,
-    topologyNodes: [], particles: [], socket: null, reconnectTimer: null,
+    topologyNodes: [], particles: [], socket: null, reconnectTimer: null, reports: [], llmSettings: null,
   };
   const maxPoints = 60;
   const typeIcons = { router: "⌁", computer: "▣", phone: "▯", tablet: "▭", tv: "▰", iot: "◇", server: "▤", printer: "▥", camera: "◉", game: "✦", unknown: "?" };
@@ -59,6 +69,14 @@
     if (seconds < 86400) return `${Math.floor(seconds / 3600)}H AGO`;
     return `${Math.floor(seconds / 86400)}D AGO`;
   };
+  const formatDateTime = (timestamp) => timestamp ? new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" }).format(new Date(Number(timestamp) * 1000)) : "—";
+
+  async function apiError(response) {
+    try {
+      const body = await response.json();
+      return body.detail || `HTTP ${response.status}`;
+    } catch (_) { return `HTTP ${response.status}`; }
+  }
 
   function setConnection(mode) {
     elements.connection.className = `live-pill ${mode}`;
@@ -148,6 +166,71 @@
     elements.eventList.innerHTML = events.slice(0, 9).map((event) => `<article class="event-item ${escapeHtml(event.severity)}">
       <i class="event-dot"></i><div class="event-copy"><strong>${escapeHtml(event.title)}</strong><span>${escapeHtml(event.detail)}</span></div><time class="event-time">${relativeTime(event.ts)}</time>
     </article>`).join("");
+  }
+
+  function renderLLMReport(report) {
+    if (!report) {
+      const configured = Boolean(state.llmSettings?.model);
+      setMiniStatus(elements.llmReportStatus, state.llmSettings?.enabled ? "waiting" : configured ? "configured" : "disabled");
+      elements.llmReportTime.textContent = "報告はまだありません";
+      elements.llmReportModel.textContent = configured ? `${state.llmSettings.model} · 最初の分析を待っています。` : "LLMを設定すると監視結果を分析します。";
+      elements.llmReportContent.textContent = configured ? "ANALYZE NOW で現在までの監視結果をすぐ分析できます。" : "右上の LLM SETTINGS からOpenAI互換のローカルLLMを設定してください。";
+      return;
+    }
+    setMiniStatus(elements.llmReportStatus, report.status === "completed" ? "completed" : "error");
+    elements.llmReportTime.textContent = formatDateTime(report.created_at);
+    elements.llmReportModel.textContent = `${report.model} · ${report.context?.sample_count || 0} samples · ${report.context?.trigger === "scheduled" ? "scheduled" : "manual"}`;
+    elements.llmReportContent.textContent = report.status === "completed" ? report.content : `分析に失敗しました: ${report.error || "原因不明"}`;
+  }
+
+  async function loadLLMSettings() {
+    const response = await fetch("/api/v1/llm/settings");
+    if (!response.ok) throw new Error(await apiError(response));
+    state.llmSettings = await response.json();
+    return state.llmSettings;
+  }
+
+  async function loadLLMReports() {
+    try {
+      const [settings, response] = await Promise.all([loadLLMSettings(), fetch("/api/v1/llm/reports?limit=20")]);
+      if (!response.ok) throw new Error(await apiError(response));
+      const payload = await response.json();
+      state.reports = payload.items || [];
+      elements.llmRunButton.disabled = Boolean(payload.running);
+      elements.llmRunButton.textContent = payload.running ? "ANALYZING…" : "ANALYZE NOW";
+      elements.llmReportHistory.innerHTML = '<option value="">LATEST REPORT</option>' + state.reports.map((report) => `<option value="${report.id}">${escapeHtml(formatDateTime(report.created_at))} · ${escapeHtml(report.status.toUpperCase())}</option>`).join("");
+      renderLLMReport(state.reports[0]);
+      if (!state.reports.length && settings.enabled) setMiniStatus(elements.llmReportStatus, "waiting");
+    } catch (error) {
+      console.warn("LLM report load failed", error);
+      setMiniStatus(elements.llmReportStatus, "error");
+      elements.llmReportContent.textContent = `LLM報告を読み込めません: ${error.message}`;
+    }
+  }
+
+  function ensureSelectValue(select, value) {
+    const normalized = String(value);
+    if (![...select.options].some((option) => option.value === normalized)) {
+      select.add(new Option(`${normalized}分`, normalized));
+    }
+    select.value = normalized;
+  }
+
+  async function openLLMSettings() {
+    elements.llmSettingsStatus.textContent = "設定を読み込んでいます…";
+    elements.llmSettingsDialog.showModal();
+    try {
+      const settings = await loadLLMSettings();
+      elements.llmEnabled.checked = Boolean(settings.enabled);
+      elements.llmBaseUrl.value = settings.base_url || "";
+      elements.llmModel.value = settings.model || "";
+      elements.llmSystemPrompt.value = settings.system_prompt || "";
+      ensureSelectValue(elements.llmInterval, settings.interval_minutes);
+      ensureSelectValue(elements.llmLookback, settings.lookback_minutes);
+      elements.llmApiKey.value = "";
+      elements.llmClearApiKey.checked = false;
+      elements.llmSettingsStatus.textContent = settings.api_key_configured ? "APIキーは暗号化して設定済みです。変更する場合だけ入力してください。" : "APIキーは未設定です。";
+    } catch (error) { elements.llmSettingsStatus.textContent = `設定を読み込めません: ${error.message}`; }
   }
 
   function setMiniStatus(element, value) {
@@ -340,11 +423,75 @@
     if (response.ok) { const updated = await response.json(); state.devices = state.devices.map((item) => item.ip === updated.ip ? { ...item, ...updated, is_trusted: Boolean(updated.is_trusted) } : item); renderDevices(); elements.dialog.close(); }
   });
 
+  elements.llmSettingsButton.addEventListener("click", openLLMSettings);
+  elements.llmSettingsClose.addEventListener("click", () => elements.llmSettingsDialog.close());
+  elements.llmSettingsCancel.addEventListener("click", () => elements.llmSettingsDialog.close());
+  elements.llmReportHistory.addEventListener("change", () => {
+    const selected = state.reports.find((report) => String(report.id) === elements.llmReportHistory.value);
+    renderLLMReport(selected || state.reports[0]);
+  });
+  elements.llmLoadModels.addEventListener("click", async () => {
+    elements.llmLoadModels.disabled = true;
+    elements.llmSettingsStatus.textContent = "モデル一覧を取得しています…";
+    const payload = { base_url: elements.llmBaseUrl.value.trim() };
+    if (elements.llmApiKey.value) payload.api_key = elements.llmApiKey.value;
+    try {
+      const response = await fetch("/api/v1/llm/models", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (!response.ok) throw new Error(await apiError(response));
+      const body = await response.json();
+      elements.llmModelOptions.innerHTML = (body.models || []).map((model) => `<option value="${escapeHtml(model.id)}">${escapeHtml(model.display_name || model.id)}</option>`).join("");
+      elements.llmSettingsStatus.textContent = `${body.models.length}件の生成モデルを取得しました。候補にないモデルも手入力できます。`;
+    } catch (error) { elements.llmSettingsStatus.textContent = `${error.message} モデル名は手入力できます。`; }
+    finally { elements.llmLoadModels.disabled = false; }
+  });
+  elements.llmSettingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = {
+      enabled: elements.llmEnabled.checked,
+      base_url: elements.llmBaseUrl.value.trim(),
+      model: elements.llmModel.value.trim(),
+      system_prompt: elements.llmSystemPrompt.value.trim(),
+      interval_minutes: Number(elements.llmInterval.value),
+      lookback_minutes: Number(elements.llmLookback.value),
+    };
+    if (elements.llmClearApiKey.checked) payload.api_key = "";
+    else if (elements.llmApiKey.value) payload.api_key = elements.llmApiKey.value;
+    elements.llmSettingsStatus.textContent = "設定を保存しています…";
+    try {
+      const response = await fetch("/api/v1/llm/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (!response.ok) throw new Error(await apiError(response));
+      state.llmSettings = await response.json();
+      elements.llmSettingsStatus.textContent = "設定を保存しました。次の分析から反映されます。";
+      window.setTimeout(() => elements.llmSettingsDialog.close(), 650);
+      await loadLLMReports();
+    } catch (error) { elements.llmSettingsStatus.textContent = `保存できません: ${error.message}`; }
+  });
+  elements.llmRunButton.addEventListener("click", async () => {
+    elements.llmRunButton.disabled = true;
+    elements.llmRunButton.textContent = "ANALYZING…";
+    setMiniStatus(elements.llmReportStatus, "running");
+    elements.llmReportContent.textContent = "監視データを集約し、ローカルLLMで分析しています…";
+    try {
+      const response = await fetch("/api/v1/llm/reports/run", { method: "POST" });
+      if (!response.ok) throw new Error(await apiError(response));
+      await response.json();
+      await loadLLMReports();
+    } catch (error) {
+      setMiniStatus(elements.llmReportStatus, "error");
+      elements.llmReportContent.textContent = `分析できません: ${error.message}`;
+    } finally {
+      elements.llmRunButton.disabled = false;
+      elements.llmRunButton.textContent = "ANALYZE NOW";
+    }
+  });
+
   window.setInterval(() => { elements.clock.textContent = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date()); }, 1000);
   window.setInterval(() => { if (state.socket?.readyState === WebSocket.OPEN) state.socket.send("ping"); }, 20000);
+  window.setInterval(loadLLMReports, 60000);
   window.addEventListener("resize", () => { drawTraffic(); drawTopology(performance.now()); });
 
   loadInitial();
+  loadLLMReports();
   connect();
   requestAnimationFrame(animate);
 })();

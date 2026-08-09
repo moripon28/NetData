@@ -80,3 +80,96 @@ def test_agent_rejects_bad_signature(tmp_path):
             headers={"X-Agent-Timestamp": str(int(time.time())), "X-Agent-Signature": "bad"},
         )
         assert response.status_code == 401
+
+
+def test_llm_settings_model_discovery_and_manual_report(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path,
+        collector_enabled=False,
+        discovery_enabled=False,
+        demo_mode=True,
+        llm_base_url="http://127.0.0.1:1234/v1",
+        llm_model="test-model",
+    )
+    app = create_app(settings)
+
+    async def fake_list_models(base_url, api_key=""):
+        assert base_url == "http://127.0.0.1:1234/v1"
+        assert api_key == "secret-value"
+        return [{"id": "chat-model"}]
+
+    async def fake_report(base_url, model, api_key, context, system_prompt):
+        assert base_url == "http://127.0.0.1:1234/v1"
+        assert model == "chat-model"
+        assert api_key == "secret-value"
+        assert context["samples"]["sample_count"] == 1
+        assert system_prompt == "必ず日本語で報告してください。"
+        return "総評\nネットワークは正常です。"
+
+    with TestClient(app) as client:
+        client.portal.call(app.state.monitor.collect_once)
+        app.state.llm_reporter.client.list_models = fake_list_models
+        app.state.llm_reporter.client.create_report = fake_report
+
+        update = client.put(
+            "/api/v1/llm/settings",
+            json={
+                "enabled": True,
+                "base_url": "http://127.0.0.1:1234/v1",
+                "model": "chat-model",
+                "system_prompt": "必ず日本語で報告してください。",
+                "interval_minutes": 60,
+                "lookback_minutes": 60,
+                "api_key": "secret-value",
+            },
+        )
+        assert update.status_code == 200
+        assert update.json()["api_key_configured"] is True
+        assert "api_key" not in update.json()
+
+        public_settings = client.get("/api/v1/llm/settings").json()
+        assert public_settings["model"] == "chat-model"
+        assert public_settings["system_prompt"] == "必ず日本語で報告してください。"
+        assert "secret-value" not in json.dumps(public_settings)
+
+        models = client.post(
+            "/api/v1/llm/models", json={"base_url": "http://127.0.0.1:1234/v1"}
+        )
+        assert models.status_code == 200
+        assert models.json()["models"] == [{"id": "chat-model"}]
+
+        generated = client.post("/api/v1/llm/reports/run")
+        assert generated.status_code == 200
+        assert generated.json()["status"] == "completed"
+        reports = client.get("/api/v1/llm/reports").json()
+        assert reports["items"][0]["content"].startswith("総評")
+        assert reports["items"][0]["context"]["sample_count"] == 1
+
+        async def fake_other_models(base_url, api_key=""):
+            assert base_url == "http://192.168.10.99:1234/v1"
+            assert api_key == ""
+            return []
+
+        app.state.llm_reporter.client.list_models = fake_other_models
+        other = client.post(
+            "/api/v1/llm/models", json={"base_url": "http://192.168.10.99:1234/v1"}
+        )
+        assert other.status_code == 200
+
+        moved = client.put(
+            "/api/v1/llm/settings", json={"base_url": "http://192.168.10.99:1234/v1"}
+        )
+        assert moved.status_code == 200
+        assert moved.json()["api_key_configured"] is False
+
+
+def test_llm_settings_reject_credentials_in_base_url(tmp_path):
+    settings = Settings(data_dir=tmp_path, collector_enabled=False, discovery_enabled=False)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/v1/llm/settings",
+            json={"base_url": "http://user:password@192.168.10.20:1234/v1"},
+        )
+        assert response.status_code == 400
+        assert "password" not in response.text

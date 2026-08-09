@@ -1,10 +1,38 @@
 from __future__ import annotations
 
+import sqlite3
 import time
 
 import pytest
 
 from app.database import Database
+
+
+@pytest.mark.asyncio
+async def test_database_adds_system_prompt_to_existing_llm_settings(tmp_path):
+    path = tmp_path / "legacy.db"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE llm_settings (
+            id INTEGER PRIMARY KEY, enabled INTEGER NOT NULL, base_url TEXT NOT NULL,
+            model TEXT NOT NULL, interval_minutes INTEGER NOT NULL, lookback_minutes INTEGER NOT NULL,
+            api_key_encrypted TEXT NOT NULL, updated_at REAL NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        "INSERT INTO llm_settings VALUES (1, 0, '', '', 60, 60, '', ?)", (time.time(),)
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    await database.connect()
+    try:
+        assert (await database.llm_settings())["system_prompt"] == ""
+    finally:
+        await database.close()
 
 
 @pytest.mark.asyncio
@@ -47,6 +75,8 @@ async def test_database_round_trip(tmp_path):
             [{"ts": now, "target": "192.168.10.1", "metric": "wan_rx_bps", "value": 2048, "unit": "bytes/s"}]
         )
         assert (await database.snmp_history(1))[0]["value"] == 2048
+        snmp_statistics = await database.snmp_statistics(1)
+        assert snmp_statistics[0]["value_avg"] == 2048
 
         await database.upsert_agent(
             {
@@ -61,5 +91,31 @@ async def test_database_round_trip(tmp_path):
             await database.observe_baseline("test_metric", 12, value, 10)
         baseline = await database.observe_baseline("test_metric", 12, 50.0, 10)
         assert baseline["z_score"] > 3.5
+
+        await database.ensure_llm_settings(
+            {
+                "enabled": False, "base_url": "http://127.0.0.1:1234/v1", "model": "test-model",
+                "system_prompt": "日本語で報告してください。",
+                "interval_minutes": 60, "lookback_minutes": 60, "api_key_encrypted": "ciphertext",
+            }
+        )
+        llm_settings = await database.update_llm_settings({"enabled": True, "lookback_minutes": 360})
+        assert llm_settings["enabled"] is True
+        assert llm_settings["api_key_encrypted"] == "ciphertext"
+        assert llm_settings["system_prompt"] == "日本語で報告してください。"
+        statistics = await database.sample_statistics(60)
+        assert statistics["sample_count"] == 1
+        assert statistics["rx_bps_avg"] == 1024
+
+        report = await database.save_llm_report(
+            period_start=now - 3600,
+            period_end=now,
+            model="test-model",
+            status="completed",
+            content="ネットワークは正常です。",
+            context={"trigger": "manual", "sample_count": 1},
+        )
+        assert report["context"]["sample_count"] == 1
+        assert (await database.llm_reports(1))[0]["content"] == "ネットワークは正常です。"
     finally:
         await database.close()

@@ -17,6 +17,7 @@ NetPulseは、Raspberry Pi 5で自宅LANを観測するローカルファース�
 - SNMPv2cでルーターのWAN通信量とベンダー固有のWi-Fi OIDを収集
 - HMAC署名付きWindows/Linuxエージェントから端末内部メトリクスを収集
 - 時間帯別ベースラインを学習し、通信量・遅延・端末数・負荷の異常を検知
+- OpenAI互換のローカルLLMで監視結果を定期分析し、日本語の運用報告として保存・表示
 
 ## 構成
 
@@ -27,6 +28,7 @@ LAN端末 / Gateway
 ┌──────────────────────────────┐
 │ NetPulse container           │
 │ Collector → SQLite → API/WS  │
+│           → LLM集約 → Report │
 │                    → Web UI  │
 └──────────────────────────────┘
        │
@@ -81,6 +83,14 @@ docker compose down
 | `SNMP_EXTRA_OIDS` | 空 | `name=oid` 形式のWi-Fi等ベンダー固有OID |
 | `AGENT_TOKEN` | 空 | エージェント署名用のランダム共有鍵 |
 | `ANOMALY_MIN_SAMPLES` | `20` | 各時間帯の学習完了に必要なサンプル数 |
+| `LLM_REPORT_ENABLED` | `false` | ローカルLLMによる定期報告を有効化 |
+| `LLM_BASE_URL` | `http://127.0.0.1:1234/v1` | LM Studio等のOpenAI互換Base URL |
+| `LLM_MODEL` | 空 | 報告に使う生成モデル名 |
+| `LLM_SYSTEM_PROMPT` | 日本語の運用報告用 | 報告言語・役割・構成を指定するシステムプロンプト |
+| `LLM_API_KEY` | 空 | 接続先が要求する場合だけ設定するAPIキー |
+| `LLM_REPORT_INTERVAL_MINUTES` | `60` | 定期報告の実行間隔（最短15分） |
+| `LLM_REPORT_LOOKBACK_MINUTES` | `60` | 1回の報告で分析する監視期間 |
+| `LLM_REQUEST_TIMEOUT_SECONDS` | `120` | ローカルLLM応答の待機秒数 |
 | `DEMO_MODE` | `false` | 実端末の代わりにデモデータを生成 |
 
 設定変更後は `docker compose up -d` で反映します。
@@ -104,6 +114,16 @@ docker compose down
 DHCPリースやローカルのMACベンダーデータベースとの連携は、端末名の精度向上として引き続き追加可能です。
 
 パケット本文、閲覧URL、DNSクエリ内容の常時保存は、家庭内でもプライバシーへの影響が大きいため初期実装には入れていません。必要になった場合も、対象・保持期間・閲覧権限を明確にして追加するのがおすすめです。
+
+## ローカルLLM報告を有効にする
+
+vulnintelと同じく、LM StudioやOllamaなどのOpenAI互換APIを利用します。画面右上の `LLM SETTINGS` を開き、Base URLを入力して `一覧取得` を押すと、LLMサーバーが公開している生成モデルを選べます。LM Studioのnative APIも補助的に参照するため、embeddingモデルは候補から除外されます。一覧取得に失敗してもモデル名は手入力できます。システムプロンプトも画面から編集でき、既定値は出力全体を日本語に限定しています。
+
+LM Studioを別のWindows/Linux PCで動かす場合は、サーバーをLANから接続可能にし、Base URLへ `http://<LLM-PCのLAN IP>:1234/v1` を指定します。PCのファイアウォールではTCP 1234をRaspberry Pi `192.168.10.201` からだけ許可してください。インターネット上のAPIを指定することも技術的には可能ですが、本機能は家庭内のローカルLLM利用を前提にしています。
+
+設定後は `ANALYZE NOW` で手動報告を確認してから定期分析を有効にしてください。NetPulseは指定期間の監視サンプルを平均・最小・最大へ集約し、到達性、イベント、端末・エージェント状態とともにLLMへ渡します。パケット本文、閲覧URL、保存済みAPIキーはプロンプトに含めません。報告はSQLiteへ保存され、画面の履歴から参照できます。
+
+APIキーは通常のLM Studioでは不要です。入力した場合もAPIレスポンスへ値を返さず、`data/.llm-settings.key` のローカル鍵で暗号化してSQLiteへ保存します。Base URLを別の接続先へ変更したときは、意図しない転送を防ぐため保存済みAPIキーを自動的に解除します。バックアップ時は `netpulse.db` と `.llm-settings.key` を一緒に保管し、どちらも公開リポジトリへ入れないでください。LLM設定はSQLiteが実行時の正本となり、画面で保存した変更は次の分析から即時反映されます。
 
 ## SNMPを有効にする
 
@@ -132,7 +152,7 @@ python -m pytest
 
 Windows PowerShellでは有効化コマンドを `.\.venv\Scripts\Activate.ps1` に読み替えてください。デモ表示は `DEMO_MODE=true` と `DATA_DIR=./data` を設定して `uvicorn app.main:app --reload --port 39080` を実行します。
 
-API仕様は `/docs` で確認できます。主要エンドポイントは `/api/v1/snapshot`、`/api/v1/history`、`/api/v1/connectivity`、`/api/v1/snmp`、`/api/v1/agents`、`/api/v1/events`、`/ws/live` です。
+API仕様は `/docs` で確認できます。主要エンドポイントは `/api/v1/snapshot`、`/api/v1/history`、`/api/v1/connectivity`、`/api/v1/snmp`、`/api/v1/agents`、`/api/v1/events`、`/api/v1/llm/settings`、`/api/v1/llm/models`、`/api/v1/llm/reports`、`/ws/live` です。
 
 ## セキュリティ上の注意
 

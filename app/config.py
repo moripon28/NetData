@@ -6,6 +6,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 
+DEFAULT_LLM_SYSTEM_PROMPT = (
+    "あなたは家庭内ネットワークの運用アナリストです。与えられた観測値だけを使い、必ず日本語で簡潔に報告してください。"
+    "見出し、説明、推奨事項を含む出力のすべてを日本語にし、英語で回答しないでください。"
+    "データが無い項目は推測せず、断定には必ず数値またはイベントを根拠として添えてください。"
+    "報告は『総評』『注目点』『推奨対応』『根拠』の順にし、問題が無い場合もその理由を説明してください。"
+    "設定変更や外部への通信を実行したように装わないでください。"
+)
+
+
 def _bool_env(name: str, default: bool) -> bool:
     value = os.getenv(name)
     if value is None:
@@ -72,6 +81,16 @@ class Settings:
     anomaly_enabled: bool = field(default_factory=lambda: _bool_env("ANOMALY_ENABLED", True))
     anomaly_interval: int = field(default_factory=lambda: _int_env("ANOMALY_INTERVAL_SECONDS", 30, 10))
     anomaly_min_samples: int = field(default_factory=lambda: _int_env("ANOMALY_MIN_SAMPLES", 20, 10))
+    llm_report_enabled: bool = field(default_factory=lambda: _bool_env("LLM_REPORT_ENABLED", False))
+    llm_base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL", "http://127.0.0.1:1234/v1").strip())
+    llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "").strip())
+    llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", "").strip())
+    llm_system_prompt: str = field(
+        default_factory=lambda: os.getenv("LLM_SYSTEM_PROMPT", "").strip() or DEFAULT_LLM_SYSTEM_PROMPT
+    )
+    llm_report_interval: int = field(default_factory=lambda: _int_env("LLM_REPORT_INTERVAL_MINUTES", 60, 15))
+    llm_report_lookback: int = field(default_factory=lambda: _int_env("LLM_REPORT_LOOKBACK_MINUTES", 60, 15))
+    llm_request_timeout: int = field(default_factory=lambda: _int_env("LLM_REQUEST_TIMEOUT_SECONDS", 120, 10))
 
     @property
     def database_path(self) -> Path:

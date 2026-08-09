@@ -19,6 +19,7 @@
       <span><strong>NETPULSE</strong><small>HOME NETWORK OBSERVATORY</small></span>
     </a>
     <div class="topbar-status">
+      <button class="topbar-action" id="llmSettingsButton" type="button">LLM SETTINGS</button>
       <div class="live-pill" id="connectionPill"><span></span><b>CONNECTING</b></div>
       <time id="clock">--:--:--</time>
     </div>
@@ -152,9 +153,27 @@
         </div>
       </article>
 
+      <article class="panel llm-panel">
+        <header class="panel-head llm-head">
+          <div><span class="panel-index">07</span><h2>LOCAL LLM NETWORK REPORT</h2></div>
+          <div class="panel-actions">
+            <select id="llmReportHistory" aria-label="過去のLLM報告"><option value="">REPORT HISTORY</option></select>
+            <button class="panel-button" id="llmRunButton" type="button">ANALYZE NOW</button>
+          </div>
+        </header>
+        <div class="llm-report-wrap">
+          <aside class="llm-report-meta">
+            <b class="mini-status disabled" id="llmReportStatus">DISABLED</b>
+            <strong id="llmReportTime">報告はまだありません</strong>
+            <span id="llmReportModel">LLMを設定すると監視結果を分析します。</span>
+          </aside>
+          <article class="llm-report-content" id="llmReportContent">右上の LLM SETTINGS からOpenAI互換のローカルLLMを設定してください。</article>
+        </div>
+      </article>
+
       <article class="panel events-panel">
         <header class="panel-head">
-          <div><span class="panel-index">07</span><h2>SIGNAL LOG</h2></div>
+          <div><span class="panel-index">08</span><h2>SIGNAL LOG</h2></div>
           <span class="event-count" id="eventCount">0 EVENTS</span>
         </header>
         <div class="event-list" id="eventList"><p class="empty-events">イベントを待っています…</p></div>
@@ -171,6 +190,28 @@
       <label>種類<select id="dialogType"><option value="unknown">Unknown</option><option value="router">Router</option><option value="computer">Computer</option><option value="phone">Phone</option><option value="tablet">Tablet</option><option value="tv">TV</option><option value="iot">IoT</option><option value="server">Server / NAS</option><option value="printer">Printer</option><option value="camera">Camera</option><option value="game">Game console</option></select></label>
       <label class="trust-toggle"><input id="dialogTrusted" type="checkbox"><span></span>信頼済みの端末として登録</label>
       <div class="dialog-actions"><button value="cancel" class="cancel">CANCEL</button><button type="submit" value="default" class="save">SAVE PROFILE</button></div>
+    </form>
+  </dialog>
+
+  <dialog id="llmSettingsDialog" class="settings-dialog">
+    <form id="llmSettingsForm">
+      <div class="dialog-head"><div><small>LOCAL AI SETTINGS</small><h2>ネットワーク報告</h2></div><button id="llmSettingsClose" type="button" aria-label="閉じる">×</button></div>
+      <label class="trust-toggle"><input id="llmEnabled" type="checkbox"><span></span>定期的なLLM分析を有効にする</label>
+      <div class="form-grid">
+        <label class="field-wide">Base URL<input id="llmBaseUrl" type="url" required maxlength="500" placeholder="http://192.168.10.x:1234/v1"></label>
+        <label class="field-wide">モデル
+          <span class="inline-field"><input id="llmModel" list="llmModelOptions" required maxlength="200" placeholder="モデル名を選択または入力"><button id="llmLoadModels" class="secondary-action" type="button">一覧取得</button></span>
+          <datalist id="llmModelOptions"></datalist>
+        </label>
+        <label class="field-wide">システムプロンプト<textarea id="llmSystemPrompt" required maxlength="8000" rows="7" placeholder="例: 必ず日本語で報告してください。"></textarea></label>
+        <label>報告間隔<select id="llmInterval"><option value="15">15分</option><option value="30">30分</option><option value="60">1時間</option><option value="180">3時間</option><option value="360">6時間</option><option value="720">12時間</option><option value="1440">24時間</option></select></label>
+        <label>分析対象期間<select id="llmLookback"><option value="15">直近15分</option><option value="30">直近30分</option><option value="60">直近1時間</option><option value="360">直近6時間</option><option value="1440">直近24時間</option><option value="10080">直近7日</option></select></label>
+        <label class="field-wide">APIキー（必要な場合のみ）<input id="llmApiKey" type="password" maxlength="2000" autocomplete="new-password" placeholder="保存済みの値は表示しません"></label>
+      </div>
+      <label class="trust-toggle clear-secret"><input id="llmClearApiKey" type="checkbox"><span></span>保存済みAPIキーを削除する</label>
+      <p class="form-hint">システムプロンプトには既定で日本語報告を指定しています。LM Studioは通常APIキー不要です。設定は保存後すぐ次の分析から反映されます。</p>
+      <p class="form-status" id="llmSettingsStatus" role="status"></p>
+      <div class="dialog-actions"><button id="llmSettingsCancel" type="button" class="cancel">CANCEL</button><button type="submit" class="save">SAVE SETTINGS</button></div>
     </form>
   </dialog>
 

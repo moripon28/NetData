@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.config import Settings
 from app.database import Database
+from app.llm import LLMConnectionError, LLMReporter, ReportInProgressError
 from app.service import MonitorService
 
 
@@ -41,6 +42,21 @@ class AgentHeartbeat(BaseModel):
     rx_bps: float = Field(default=0, ge=0)
     tx_bps: float = Field(default=0, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class LLMSettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    base_url: str | None = Field(default=None, min_length=8, max_length=500)
+    model: str | None = Field(default=None, max_length=200)
+    system_prompt: str | None = Field(default=None, min_length=1, max_length=8_000)
+    interval_minutes: int | None = Field(default=None, ge=15, le=10_080)
+    lookback_minutes: int | None = Field(default=None, ge=15, le=43_200)
+    api_key: str | None = Field(default=None, max_length=2_000)
+
+
+class LLMModelsRequest(BaseModel):
+    base_url: str = Field(min_length=8, max_length=500)
+    api_key: str | None = Field(default=None, max_length=2_000)
 
 
 class WebSocketHub:
@@ -70,12 +86,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     hub = WebSocketHub()
     database = Database(resolved.database_path)
     service = MonitorService(resolved, database, hub.broadcast)
+    reporter = LLMReporter(resolved, database, service.snapshot)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await database.connect()
+        await reporter.initialize()
         await service.start()
+        await reporter.start()
         yield
+        await reporter.stop()
         await service.stop()
         await database.close()
 
@@ -83,13 +103,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = resolved
     app.state.database = database
     app.state.monitor = service
+    app.state.llm_reporter = reporter
 
     if resolved.cors_origins:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=list(resolved.cors_origins),
             allow_credentials=False,
-            allow_methods=["GET", "PATCH"],
+            allow_methods=["GET", "POST", "PUT", "PATCH"],
             allow_headers=["Content-Type"],
         )
 
@@ -100,6 +121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "latest_sample_at": service.latest.get("generated_at"), "websocket_clients": len(hub.clients),
             "connectivity": service.connectivity_latest.get("status"),
             "snmp": service.snmp_latest.get("status"),
+            "llm_reporter": "running" if reporter._running else "stopped",
         }
 
     @app.get("/api/v1/snapshot")
@@ -127,6 +149,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/events")
     async def events(limit: int = Query(50, ge=1, le=500)) -> dict[str, Any]:
         return {"items": await database.events(limit)}
+
+    @app.get("/api/v1/llm/settings")
+    async def llm_settings() -> dict[str, Any]:
+        return await reporter.public_settings()
+
+    @app.put("/api/v1/llm/settings")
+    async def update_llm_settings(update: LLMSettingsUpdate) -> dict[str, Any]:
+        values = update.model_dump(exclude_unset=True)
+        if not values:
+            raise HTTPException(status_code=400, detail="No settings to update")
+        try:
+            return await reporter.update_settings(values)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/v1/llm/models")
+    async def llm_models(request: LLMModelsRequest) -> dict[str, Any]:
+        try:
+            models = await reporter.list_models(request.base_url, request.api_key)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except LLMConnectionError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return {"models": models}
+
+    @app.get("/api/v1/llm/reports")
+    async def llm_reports(limit: int = Query(10, ge=1, le=100)) -> dict[str, Any]:
+        items = await reporter.reports(limit)
+        return {"total": len(items), "items": items, "running": reporter._run_lock.locked()}
+
+    @app.post("/api/v1/llm/reports/run")
+    async def run_llm_report() -> dict[str, Any]:
+        try:
+            return await reporter.run_report("manual")
+        except ReportInProgressError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except LLMConnectionError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.get("/api/v1/connectivity")
     async def connectivity(minutes: int = Query(60, ge=1, le=43_200)) -> dict[str, Any]:
