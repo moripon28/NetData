@@ -6,7 +6,7 @@ if [ "$(id -u)" -ne 0 ]; then
   exit 1
 fi
 
-SERVER_URL="${1:-http://192.168.10.201:8080}"
+SERVER_URL="${1:-http://192.168.10.201:39080}"
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 INSTALL_DIR=/opt/netpulse-agent
 ENV_FILE=/etc/netpulse-agent.env

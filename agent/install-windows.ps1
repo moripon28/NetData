@@ -1,5 +1,5 @@
 param(
-    [string]$Server = "http://192.168.10.201:8080"
+    [string]$Server = "http://192.168.10.201:39080"
 )
 
 $ErrorActionPreference = "Stop"

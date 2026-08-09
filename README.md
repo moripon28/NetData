@@ -31,7 +31,7 @@ LAN端末 / Gateway
 └──────────────────────────────┘
        │
        ▼
-http://192.168.10.201:8080
+http://192.168.10.201:39080
 ```
 
 1コンテナ構成なので、arm64のRaspberry Piでも管理しやすく、フロントエンドのビルド環境も不要です。`network_mode: host` を使い、コンテナからLANの近隣情報とICMP応答を観測します。権限は `NET_RAW` のみに限定し、コンテナのルートファイルシステムは読み取り専用です。
@@ -46,7 +46,7 @@ docker compose up -d --build
 docker compose ps
 ```
 
-ブラウザーで `http://192.168.10.201:8080` を開きます。初回の全端末探索には最大1〜2分かかります。
+ブラウザーで `http://192.168.10.201:39080` を開きます。初回の全端末探索には最大1〜2分かかります。
 
 停止とログ確認:
 
@@ -130,7 +130,7 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-Windows PowerShellでは有効化コマンドを `.\.venv\Scripts\Activate.ps1` に読み替えてください。デモ表示は `DEMO_MODE=true` と `DATA_DIR=./data` を設定して `uvicorn app.main:app --reload --port 8080` を実行します。
+Windows PowerShellでは有効化コマンドを `.\.venv\Scripts\Activate.ps1` に読み替えてください。デモ表示は `DEMO_MODE=true` と `DATA_DIR=./data` を設定して `uvicorn app.main:app --reload --port 39080` を実行します。
 
 API仕様は `/docs` で確認できます。主要エンドポイントは `/api/v1/snapshot`、`/api/v1/history`、`/api/v1/connectivity`、`/api/v1/snmp`、`/api/v1/agents`、`/api/v1/events`、`/ws/live` です。
 

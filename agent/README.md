@@ -5,7 +5,7 @@ Windows/Linux端末自身のCPU、メモリ、ディスク、温度、通信量�
 ## Linux
 
 ```bash
-sudo ./install-linux.sh http://192.168.10.201:8080
+sudo ./install-linux.sh http://192.168.10.201:39080
 systemctl status netpulse-agent
 ```
 
@@ -15,7 +15,7 @@ systemctl status netpulse-agent
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-.\install-windows.ps1 -Server http://192.168.10.201:8080
+.\install-windows.ps1 -Server http://192.168.10.201:39080
 Get-ScheduledTask NetPulseAgent
 ```
 
