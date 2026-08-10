@@ -13,17 +13,19 @@ NetPulseは、Raspberry Pi 5で自宅LANを観測するローカルファース�
 - SQLiteに履歴を30日間保存（設定で変更可能）
 - WebSocketでブラウザーへリアルタイム配信
 - `/metrics` でPrometheus互換の主要メトリクスを公開
-- DNS応答時間と複数の外部IPへの疎通を監視し、LAN障害とインターネット障害を切り分け
-- SNMPv2cでルーターのWAN通信量とベンダー固有のWi-Fi OIDを収集
+- LAN内サービスをICMP・TCP・HTTP(S)で監視し、必要な場合だけDNS・外部IP疎通も確認
+- SNMPv3でQNAPのCPU・温度・メモリ・ディスク・RAID・プール・ボリュームを収集
+- SNMPv2c互換プロファイルでルーターのWAN通信量とベンダー固有OIDを収集
 - HMAC署名付きWindows/Linuxエージェントから端末内部メトリクスを収集
+- LAN内のnode_exporter / windows_exporterを直接スクレイプして端末内部メトリクスを収集
 - 時間帯別ベースラインを学習し、通信量・遅延・端末数・負荷の異常を検知
 - OpenAI互換のローカルLLMで監視結果を定期分析し、日本語の運用報告として保存・表示
 
 ## 構成
 
 ```text
-LAN端末 / Gateway
-       │ ping・近隣テーブル・NIC counters
+LAN端末 / Gateway / QNAP / Prometheus exporters
+       │ ping・近隣テーブル・SNMPv3・NIC counters・HTTP scrape
        ▼
 ┌──────────────────────────────┐
 │ NetPulse container           │
@@ -74,13 +76,27 @@ docker compose down
 | `DISCOVERY_INTERVAL_SECONDS` | `120` | LAN全体を探索する間隔 |
 | `DEVICE_OFFLINE_AFTER_SECONDS` | `90` | オフラインと判断するまでの秒数 |
 | `RETENTION_DAYS` | `30` | 履歴の保持日数 |
-| `CONNECTIVITY_INTERVAL_SECONDS` | `15` | DNS・外部疎通の確認間隔 |
+| `CONNECTIVITY_INTERVAL_SECONDS` | `15` | LANおよび任意の外部プローブ間隔 |
+| `LAN_PROBE_TARGETS` | 空 | `name=icmp://host`、`tcp://host:port`、HTTP(S) URLのLAN監視対象 |
+| `INTERNET_PROBES_ENABLED` | `false` | DNS・外部IPへのプローブを明示的に有効化 |
 | `INTERNET_TARGETS` | `1.1.1.1,8.8.8.8` | 外部疎通先IP |
 | `DNS_SERVERS` | ゲートウェイ | DNS応答確認先 |
 | `SNMP_ENABLED` | `false` | 読み取り専用SNMP収集を有効化 |
-| `SNMP_TARGETS` | 空 | SNMP対応ルーターのIP |
+| `SNMP_TARGETS` | 空 | QNAPまたはSNMP対応ルーターのLAN内IP |
+| `SNMP_VERSION` | `2c` | `3`でSNMPv3 authPriv、`2c`で従来互換 |
+| `SNMP_PROFILE` | `generic` | QNAPでは`qnap`、ルーターでは`generic` |
+| `SNMP_USERNAME` | 空 | SNMPv3ユーザー名 |
+| `SNMP_AUTH_PROTOCOL` | `SHA` | QTS側と同じ`SHA`または`MD5` |
+| `SNMP_AUTH_PASSWORD` | 空 | SNMPv3認証パスワード |
+| `SNMP_PRIV_PROTOCOL` | `DES` | QTS側と同じ`DES`（CBC-DES）または`AES` |
+| `SNMP_PRIV_PASSWORD` | 空 | SNMPv3プライバシーパスワード |
+| `SNMP_TIMEOUT_SECONDS` | `2` | SNMP要求のタイムアウト |
 | `SNMP_INTERFACE_INDEX` | `2` | WANインターフェースのifIndex |
 | `SNMP_EXTRA_OIDS` | 空 | `name=oid` 形式のWi-Fi等ベンダー固有OID |
+| `PROMETHEUS_EXPORTERS_ENABLED` | `false` | LAN内のPrometheus exporterを直接スクレイプ |
+| `PROMETHEUS_EXPORTER_TARGETS` | 空 | `name=http://host:port/metrics`形式の対象一覧 |
+| `PROMETHEUS_EXPORTER_INTERVAL_SECONDS` | `15` | exporterの収集間隔 |
+| `PROMETHEUS_EXPORTER_TIMEOUT_SECONDS` | `5` | exporter 1台あたりのタイムアウト |
 | `AGENT_TOKEN` | 空 | エージェント署名用のランダム共有鍵 |
 | `ANOMALY_MIN_SAMPLES` | `20` | 各時間帯の学習完了に必要なサンプル数 |
 | `LLM_REPORT_ENABLED` | `false` | ローカルLLMによる定期報告を有効化 |
@@ -99,21 +115,25 @@ docker compose down
 
 現在の実装では、プライバシーを侵しにくく、家庭内の異常に気づきやすい次の4群を優先しています。
 
-1. **回線の体感品質** — ゲートウェイ遅延、パケットロス、受信・送信速度。重い通信やWi-Fi不調を最初に発見できます。
+1. **監視ノードの通信状態** — ゲートウェイ遅延、パケットロス、Raspberry Pi自身の受信・送信速度。監視ノードや経路の異常を最初に発見できます。
 2. **端末の在席情報** — IP、MAC、ホスト名、初回・最終確認時刻、オンライン状態。知らない端末や普段いる端末の消失に気づけます。
 3. **監視ノードの健康** — CPU、メモリ、ディスク、温度、稼働時間。監視そのものが止まりそうな兆候を把握できます。
 4. **状態変化の履歴** — 新規端末、切断、復帰、しきい値超過。瞬間的な問題を後から追跡できます。
 
 追加実装では以下も収集します。
 
-- **SNMP** — 標準の64bitインターフェースカウンターからWAN速度を計算します。Wi-Fiクライアント数、チャネル、信号強度はルーターごとにOIDが異なるため `SNMP_EXTRA_OIDS` で追加します。
-- **DNS・外部疎通** — 指定DNSへのAレコード問い合わせと、複数の外部IPへのICMP応答を15秒周期で保存します。
+- **QNAP SNMP** — QTS-MIBの`1.3.6.1.4.1.55062.1`からCPU、温度、メモリ、ファン、電源、ディスク、RAID、ストレージプール、ボリューム、SSDキャッシュ、UPSを収集します。NASとディスクのシリアル番号、iSCSI情報、SMART生値は要求・保存しません。
+- **ルーターSNMP** — `generic`プロファイルでは標準の64bitインターフェースカウンターからWAN速度を計算します。Wi-Fi等は`SNMP_EXTRA_OIDS`で追加できます。
+- **LANサービス監視** — LAN内のICMP、TCPポート、HTTP(S)応答を15秒周期で保存します。外部ICMP・DNSは明示的に有効化した場合だけ実行します。
 - **ホストエージェント** — Windows/LinuxのCPU、メモリ、ディスク、温度、通信量、稼働時間を15秒周期で受信します。インストール方法は `agent/README.md` にあります。
+- **Prometheus exporter** — 管理対象Linux/Windowsの既存exporterからCPU、メモリ、ディスク、温度、稼働時間、端末自身のNIC通信量を取得します。
 - **異常検知** — ローカル時刻の時間帯ごとに平均と分散をSQLiteへ学習し、通常から大きく外れた値をイベント化します。最初の時間帯は学習完了まで約10分です。
 
 DHCPリースやローカルのMACベンダーデータベースとの連携は、端末名の精度向上として引き続き追加可能です。
 
 パケット本文、閲覧URL、DNSクエリ内容の常時保存は、家庭内でもプライバシーへの影響が大きいため初期実装には入れていません。必要になった場合も、対象・保持期間・閲覧権限を明確にして追加するのがおすすめです。
+
+表示するRaspberry Piおよび各ホストのNIC通信量は、そのホスト自身が送受信した量です。ルーターを通るLAN全体の通信量、管理外端末ごとの実通信量、Wi-Fi無線統計を表すものではありません。これらが必要な場合は、ルーター/APのSNMPまたはAPI、管理スイッチのポートミラー、インライン観測点のいずれかが別途必要です。
 
 ## ローカルLLM報告を有効にする
 
@@ -127,9 +147,56 @@ APIキーは通常のLM Studioでは不要です。入力した場合もAPIレ�
 
 ## SNMPを有効にする
 
-ルーター側でSNMPv2cの読み取り専用アクセスを、Raspberry PiのIP `192.168.10.201` だけに許可します。その後 `.env` の `SNMP_ENABLED=true`、`SNMP_TARGETS`、`SNMP_COMMUNITY`、`SNMP_INTERFACE_INDEX` を設定してコンテナを再作成します。
+QNAP TS-464ではQTSのSNMPサービスを有効にし、SNMP v3、認証、プライバシーを有効にします。QTS側でAESを選択できない場合はCBC-DESを選び、NetPulse側を`SNMP_PRIV_PROTOCOL=DES`にします。認証方式もQTS表示に合わせ、HMAC-MD5なら`MD5`、SHAなら`SHA`を指定してください。
 
-コミュニティ文字列は秘密情報として扱い、Gitや画面へ記録しないでください。NetPulseのAPIは設定値を返さず、設定済みかどうかと収集状態だけを表示します。
+`.env`の設定例です。IP、ユーザー名、パスワードは実際の値へ置き換え、値をGitやチャットへ貼らないでください。
+
+```dotenv
+SNMP_ENABLED=true
+SNMP_TARGETS=192.168.10.20
+SNMP_VERSION=3
+SNMP_PROFILE=qnap
+SNMP_USERNAME=netpulse
+SNMP_AUTH_PROTOCOL=MD5
+SNMP_AUTH_PASSWORD=ここにQTS側と同じ認証パスワード
+SNMP_PRIV_PROTOCOL=DES
+SNMP_PRIV_PASSWORD=ここにQTS側と同じプライバシーパスワード
+SNMP_INTERVAL_SECONDS=30
+```
+
+設定後に`docker compose up -d --build`でコンテナを再作成します。Web画面の`QNAP SNMP`カード、`/api/v1/snmp`、`/metrics`へ反映されます。CBC-DESとHMAC-MD5は古い方式なので、UDP 161をインターネットへ公開せず、信頼できる家庭内LANだけで使用してください。将来QTS側でAESまたはSHAを選べるようになった場合は、QTSとNetPulseを同時に強い方式へ変更してください。
+
+SNMPv3のユーザー名とパスワードは環境変数からのみ読み込み、API、Web画面、Prometheusラベル、イベントへ出力しません。QNAP MIBは対応可能な項目の定義なので、TS-464の構成によって存在しない表や値は表示されないことがあります。
+
+ルーター向けの従来収集を使う場合は`SNMP_VERSION=2c`、`SNMP_PROFILE=generic`、`SNMP_COMMUNITY`、`SNMP_INTERFACE_INDEX`を設定します。QNAP自身の詳細監視にはOpenWrtは必要ありません。
+
+## Prometheus exporterを利用する
+
+Linuxにはnode_exporter、Windowsにはwindows_exporterを導入し、それぞれの待受ポートをRaspberry Pi `192.168.10.201` からだけアクセスできるようホスト側ファイアウォールで制限します。インターネットやLAN全体へ無制限に公開しないでください。
+
+`.env` の設定例:
+
+```dotenv
+PROMETHEUS_EXPORTERS_ENABLED=true
+PROMETHEUS_EXPORTER_TARGETS=linux-nas=http://192.168.10.20:9100/metrics,windows-pc=http://192.168.10.30:9182/metrics
+PROMETHEUS_EXPORTER_INTERVAL_SECONDS=15
+```
+
+NetPulseはPrometheusテキスト形式を直接読み取るため、別のPrometheusサーバーは必須ではありません。対象URLはLAN内・ループバック・リンクローカルへ解決されるアドレスだけを許可し、リダイレクト、URL埋め込み認証情報、クエリ文字列を拒否します。対応対象はnode_exporterとwindows_exporterです。取得したホスト指標はWeb画面、`/api/v1/exporters`、LLM報告、NetPulse自身の`/metrics`へ統合されます。
+
+既存のNetPulse Agentと併用できます。同じ端末をAgentとexporterの両方で登録すると別ノードとして表示されるため、通常はどちらか一方を選んでください。AgentはPrometheus exporterをまだ導入していない端末での簡単な導入方法として残しています。
+
+## LAN内サービスを監視する
+
+ルーター、NAS、DNS、Web UIなど、Raspberry Piから到達できるLAN内サービスを低頻度で確認できます。対象は`.env`へカンマ区切りで設定します。
+
+```dotenv
+LAN_PROBE_TARGETS=gateway=icmp://192.168.10.1,nas-smb=tcp://192.168.10.20:445,nas-web=http://192.168.10.20:5000/health
+```
+
+ICMPは応答時間、TCPは接続確立、HTTP(S)は200〜399応答を正常と判定します。対象ホストはLAN内・ループバック・リンクローカルへ解決されるアドレスだけを許可し、HTTPリダイレクトは追跡しません。パケット本文や閲覧内容は取得・保存しません。
+
+インターネット側の監視は既定で無効です。従来の外部ICMPとDNS確認が必要な場合だけ`INTERNET_PROBES_ENABLED=true`を設定してください。
 
 ## Windows/Linuxエージェント
 
@@ -156,7 +223,7 @@ python -m pytest
 
 Windows PowerShellでは有効化コマンドを `.\.venv\Scripts\Activate.ps1` に読み替えてください。デモ表示は `DEMO_MODE=true` と `DATA_DIR=./data` を設定して `uvicorn app.main:app --reload --port 39080` を実行します。
 
-API仕様は `/docs` で確認できます。主要エンドポイントは `/api/v1/snapshot`、`/api/v1/history`、`/api/v1/connectivity`、`/api/v1/snmp`、`/api/v1/agents`、`/api/v1/events`、`/api/v1/llm/settings`、`/api/v1/llm/models`、`/api/v1/llm/reports`、`/ws/live` です。
+API仕様は `/docs` で確認できます。主要エンドポイントは `/api/v1/snapshot`、`/api/v1/history`、`/api/v1/connectivity`、`/api/v1/snmp`、`/api/v1/exporters`、`/api/v1/agents`、`/api/v1/events`、`/api/v1/llm/settings`、`/api/v1/llm/models`、`/api/v1/llm/reports`、`/ws/live` です。
 
 ## セキュリティ上の注意
 

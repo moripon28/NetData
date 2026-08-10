@@ -128,6 +128,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "latest_sample_at": service.latest.get("generated_at"), "websocket_clients": len(hub.clients),
             "connectivity": service.connectivity_latest.get("status"),
             "snmp": service.snmp_latest.get("status"),
+            "prometheus_exporters": service.exporters_latest.get("status"),
             "llm_reporter": "running" if reporter._running else "stopped",
         }
 
@@ -207,13 +208,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/agents")
     async def agents() -> dict[str, Any]:
-        items = await database.agents(resolved.agent_offline_after)
+        items = await service.agent_nodes()
         return {
             "configured": bool(resolved.agent_token),
             "online": sum(item["status"] == "online" for item in items),
             "total": len(items),
             "items": items,
         }
+
+    @app.get("/api/v1/exporters")
+    async def exporters() -> dict[str, Any]:
+        return await service.exporters()
 
     @app.post("/api/v1/agent/heartbeat")
     async def agent_heartbeat(request: Request) -> dict[str, Any]:
@@ -261,12 +266,116 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "netpulse_dns_latency_milliseconds": snap.get("connectivity", {}).get("dns_latency_ms") or 0,
             "netpulse_internet_latency_milliseconds": snap.get("connectivity", {}).get("internet_latency_ms") or 0,
             "netpulse_connectivity_up": 1 if snap.get("connectivity", {}).get("status") == "online" else 0,
+            "netpulse_lan_connectivity_up": 1 if snap.get("connectivity", {}).get("lan_status") == "online" else 0,
             "netpulse_agents_online": snap.get("agents", {}).get("online") or 0,
             "netpulse_active_anomalies": len(snap.get("insights", {}).get("active", [])),
             "netpulse_snmp_wan_receive_bytes_per_second": snap.get("snmp", {}).get("metrics", {}).get("wan_rx_bps") or 0,
             "netpulse_snmp_wan_transmit_bytes_per_second": snap.get("snmp", {}).get("metrics", {}).get("wan_tx_bps") or 0,
         }
-        return "\n".join(f"# TYPE {name} gauge\n{name} {value}" for name, value in values.items()) + "\n"
+        lines = [line for name, value in values.items() for line in (f"# TYPE {name} gauge", f"{name} {value}")]
+
+        def labels(values: dict[str, Any]) -> str:
+            escaped = []
+            for key, value in values.items():
+                text = str(value).replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
+                escaped.append(f'{key}="{text}"')
+            return "{" + ",".join(escaped) + "}"
+
+        native_nodes = await service.agent_nodes()
+        exporter_nodes = await service.exporter_nodes()
+        all_nodes = [("agent", item) for item in native_nodes] + [("prometheus", item) for item in exporter_nodes]
+        host_metrics = (
+            ("netpulse_host_up", lambda item: 1 if item.get("status") == "online" else 0),
+            ("netpulse_host_cpu_percent", lambda item: item.get("cpu_percent") or 0),
+            ("netpulse_host_memory_percent", lambda item: item.get("memory_percent") or 0),
+            ("netpulse_host_disk_percent", lambda item: item.get("disk_percent") or 0),
+            ("netpulse_host_receive_bytes_per_second", lambda item: item.get("rx_bps") or 0),
+            ("netpulse_host_transmit_bytes_per_second", lambda item: item.get("tx_bps") or 0),
+            ("netpulse_host_uptime_seconds", lambda item: item.get("uptime_seconds") or 0),
+        )
+        for name, getter in host_metrics:
+            lines.append(f"# TYPE {name} gauge")
+            for source, item in all_nodes:
+                lines.append(
+                    f"{name}{labels({'node_id': item['node_id'], 'hostname': item['hostname'], 'source': source, 'os': item['os_name']})} {getter(item)}"
+                )
+        lines.append("# TYPE netpulse_prometheus_exporter_up gauge")
+        for item in service.exporters_latest.get("items", []):
+            lines.append(
+                f"netpulse_prometheus_exporter_up{labels({'target': item['name'], 'kind': item.get('kind', 'unknown')})} "
+                f"{1 if item.get('status') == 'online' else 0}"
+            )
+        qnap_details = [item for item in snap.get("snmp", {}).get("details", []) if item.get("profile") == "qnap"]
+        qnap_system_metrics = (
+            ("netpulse_qnap_cpu_percent", "cpu_percent"),
+            ("netpulse_qnap_cpu_temperature_celsius", "cpu_temperature_celsius"),
+            ("netpulse_qnap_system_temperature_celsius", "system_temperature_celsius"),
+            ("netpulse_qnap_memory_total_bytes", "memory_total_bytes"),
+            ("netpulse_qnap_memory_free_bytes", "memory_free_bytes"),
+            ("netpulse_qnap_memory_available_bytes", "memory_available_bytes"),
+            ("netpulse_qnap_memory_used_bytes", "memory_used_bytes"),
+            ("netpulse_qnap_uptime_seconds", "uptime_seconds"),
+        )
+        lines.extend(("# TYPE netpulse_qnap_up gauge", "# TYPE netpulse_qnap_warning_count gauge"))
+        for item in qnap_details:
+            identity = item.get("identity", {})
+            target_labels = labels(
+                {"target": item.get("target", ""), "hostname": identity.get("hostname") or "", "model": identity.get("model") or ""}
+            )
+            lines.append(f"netpulse_qnap_up{target_labels} {1 if item.get('status') in {'online', 'degraded'} else 0}")
+            lines.append(f"netpulse_qnap_warning_count{target_labels} {len(item.get('warnings', []))}")
+        for metric_name, field in qnap_system_metrics:
+            lines.append(f"# TYPE {metric_name} gauge")
+            for item in qnap_details:
+                raw = item.get("system", {}).get(field)
+                if raw is not None:
+                    lines.append(f"{metric_name}{labels({'target': item.get('target', '')})} {raw}")
+        healthy_states = {"good", "ready", "normal", "ok", "active", "optimal"}
+        for metric_name in (
+            "netpulse_qnap_disk_temperature_celsius", "netpulse_qnap_disk_capacity_bytes", "netpulse_qnap_disk_status_ok",
+        ):
+            lines.append(f"# TYPE {metric_name} gauge")
+        for item in qnap_details:
+            for disk in item.get("disks", []):
+                disk_labels = labels(
+                    {
+                        "target": item.get("target", ""), "disk_id": disk.get("id") or disk.get("index", ""),
+                        "model": disk.get("model") or "", "type": disk.get("type") or "",
+                    }
+                )
+                if disk.get("temperature_celsius") is not None:
+                    lines.append(f"netpulse_qnap_disk_temperature_celsius{disk_labels} {disk['temperature_celsius']}")
+                if disk.get("capacity_bytes") is not None:
+                    lines.append(f"netpulse_qnap_disk_capacity_bytes{disk_labels} {disk['capacity_bytes']}")
+                disk_ok = str(disk.get("status") or "").strip().lower() in healthy_states
+                lines.append(f"netpulse_qnap_disk_status_ok{disk_labels} {1 if disk_ok else 0}")
+        for kind, collection in (("raid", "raids"), ("pool", "storage_pools"), ("volume", "volumes")):
+            for suffix in ("capacity_bytes", "free_bytes", "status_ok"):
+                lines.append(f"# TYPE netpulse_qnap_{kind}_{suffix} gauge")
+            for item in qnap_details:
+                for storage in item.get(collection, []):
+                    storage_labels = labels(
+                        {"target": item.get("target", ""), f"{kind}_id": storage.get("id") or storage.get("index", "")}
+                    )
+                    if storage.get("capacity_bytes") is not None:
+                        lines.append(f"netpulse_qnap_{kind}_capacity_bytes{storage_labels} {storage['capacity_bytes']}")
+                    if storage.get("free_bytes") is not None:
+                        lines.append(f"netpulse_qnap_{kind}_free_bytes{storage_labels} {storage['free_bytes']}")
+                    status_ok = str(storage.get("status") or "").strip().lower() in healthy_states
+                    lines.append(f"netpulse_qnap_{kind}_status_ok{storage_labels} {1 if status_ok else 0}")
+        lines.extend(("# TYPE netpulse_probe_up gauge", "# TYPE netpulse_probe_latency_milliseconds gauge"))
+        for item in snap.get("connectivity", {}).get("checks", []):
+            probe_labels = labels({"target": item.get("target", ""), "type": item.get("check_type", "unknown")})
+            lines.append(f"netpulse_probe_up{probe_labels} {1 if item.get('success') else 0}")
+            if item.get("latency_ms") is not None:
+                lines.append(f"netpulse_probe_latency_milliseconds{probe_labels} {item['latency_ms']}")
+        lines.append("# TYPE netpulse_device_up gauge")
+        for item in await service.devices():
+            lines.append(
+                f"netpulse_device_up{labels({'ip': item['ip'], 'hostname': item.get('hostname') or '', 'type': item.get('device_type') or 'unknown'})} "
+                f"{1 if item.get('status') == 'online' else 0}"
+            )
+        return "\n".join(lines) + "\n"
 
     @app.websocket("/ws/live")
     async def websocket_live(websocket: WebSocket) -> None:

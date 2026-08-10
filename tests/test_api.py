@@ -33,6 +33,23 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "netpulse_health_score" in metrics.text
 
 
+def test_external_probes_are_opt_in_and_lan_probe_state_is_exposed(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path,
+        collector_enabled=False,
+        discovery_enabled=False,
+        lan_probe_targets=("gateway=icmp://192.168.10.1",),
+    )
+    app = create_app(settings)
+    assert app.state.monitor.connectivity.internet_targets == ()
+    assert app.state.monitor.connectivity.dns_servers == ()
+    assert app.state.monitor.connectivity.lan_targets[0].name == "gateway"
+    with TestClient(app) as client:
+        snapshot = client.get("/api/v1/snapshot").json()
+        assert snapshot["connectivity"]["lan_status"] == "checking"
+        assert snapshot["connectivity"]["external_status"] == "disabled"
+
+
 def test_agent_install_files_are_available_without_exposing_other_files(tmp_path):
     settings = Settings(data_dir=tmp_path, collector_enabled=False, discovery_enabled=False)
     app = create_app(settings)
@@ -101,6 +118,93 @@ def test_agent_rejects_bad_signature(tmp_path):
             headers={"X-Agent-Timestamp": str(int(time.time())), "X-Agent-Signature": "bad"},
         )
         assert response.status_code == 401
+
+
+def test_prometheus_exporter_nodes_are_separate_from_signed_agents(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path,
+        collector_enabled=False,
+        discovery_enabled=False,
+        prometheus_exporters_enabled=True,
+        prometheus_exporter_targets=("nas=http://192.168.10.20:9100/metrics",),
+    )
+    app = create_app(settings)
+    sample = {
+        "node_id": "exporter-test",
+        "hostname": "nas",
+        "os_name": "Linux",
+        "os_version": "6.12",
+        "agent_version": "node_exporter",
+        "cpu_percent": 10.0,
+        "memory_percent": 20.0,
+        "disk_percent": 30.0,
+        "temperature_c": 40.0,
+        "uptime_seconds": 1000,
+        "rx_bps": 123.0,
+        "tx_bps": 45.0,
+        "metadata": {
+            "collection_method": "prometheus",
+            "exporter_kind": "node_exporter",
+            "target_name": "nas",
+        },
+    }
+    status = {
+        "name": "nas", "url": "http://192.168.10.20:9100/metrics", "status": "online",
+        "kind": "node_exporter", "duration_ms": 4.2, "error": "", "updated_at": time.time(),
+    }
+    app.state.monitor.prometheus.collect = lambda: ([sample], [status])
+    with TestClient(app) as client:
+        client.portal.call(app.state.monitor.collect_exporters_once)
+        exporters = client.get("/api/v1/exporters").json()
+        assert exporters["status"] == "ok"
+        assert exporters["online"] == 1
+        assert exporters["nodes"][0]["hostname"] == "nas"
+        assert client.get("/api/v1/agents").json()["total"] == 0
+        metrics = client.get("/metrics").text
+        assert 'netpulse_host_up{node_id="exporter-test",hostname="nas",source="prometheus",os="Linux"} 1' in metrics
+        assert 'netpulse_prometheus_exporter_up{target="nas",kind="node_exporter"} 1' in metrics
+
+
+def test_qnap_snmp_details_and_metrics_exclude_credentials_and_serials(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path,
+        collector_enabled=False,
+        discovery_enabled=False,
+        snmp_enabled=True,
+        snmp_targets=("192.168.10.20",),
+        snmp_version="3",
+        snmp_profile="qnap",
+        snmp_username="netpulse",
+        snmp_auth_password="auth-secret",
+        snmp_priv_protocol="DES",
+        snmp_priv_password="privacy-secret",
+    )
+    app = create_app(settings)
+    qnap = {
+        "target": "192.168.10.20",
+        "profile": "qnap",
+        "status": "online",
+        "identity": {"model": "TS-464", "hostname": "home-nas", "firmware": "QTS 5.2"},
+        "system": {"cpu_percent": 15, "cpu_temperature_celsius": 47, "uptime_seconds": 3600},
+        "disks": [{"index": "1", "id": "1", "model": "Disk Model", "type": "SATA", "status": "Good", "temperature_celsius": 38, "capacity_bytes": 4_000}],
+        "raids": [{"index": "1", "id": "1", "status": "Ready", "capacity_bytes": 4_000}],
+        "storage_pools": [{"index": "1", "id": "1", "status": "ready", "capacity_bytes": 4_000, "free_bytes": 1_000}],
+        "volumes": [{"index": "1", "id": "1", "status": "Ready", "capacity_bytes": 4_000, "free_bytes": 1_000}],
+        "warnings": [],
+    }
+    app.state.monitor.snmp_latest.update({"status": "ok", "details": [qnap]})
+    app.state.monitor.latest["snmp"] = app.state.monitor.snmp_latest
+    with TestClient(app) as client:
+        body = client.get("/api/v1/snmp").json()
+        encoded = json.dumps(body)
+        assert body["current"]["details"][0]["identity"]["model"] == "TS-464"
+        assert "auth-secret" not in encoded
+        assert "privacy-secret" not in encoded
+        assert "serial" not in encoded.lower()
+        metrics = client.get("/metrics").text
+        assert 'netpulse_qnap_up{target="192.168.10.20",hostname="home-nas",model="TS-464"} 1' in metrics
+        assert 'netpulse_qnap_disk_temperature_celsius{target="192.168.10.20",disk_id="1",model="Disk Model",type="SATA"} 38' in metrics
+        assert "secret" not in metrics
 
 
 def test_llm_settings_model_discovery_and_manual_report(tmp_path):

@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable
 from app.anomaly import AnomalyDetector
 from app.collectors.connectivity import ConnectivityCollector
 from app.collectors.network import DeviceDiscovery, TrafficCollector
+from app.collectors.prometheus import PrometheusExporterCollector
 from app.collectors.snmp import SnmpCollector
 from app.collectors.system import SystemCollector
 from app.config import Settings
@@ -35,10 +36,31 @@ class MonitorService:
             settings.offline_after,
             settings.discovery_interval + 15 if settings.discovery_enabled else settings.offline_after,
         )
-        dns_servers = settings.dns_servers or tuple(filter(None, (self.gateway,)))
-        self.connectivity = ConnectivityCollector(dns_servers, settings.internet_targets, settings.dns_check_name)
+        dns_servers = (settings.dns_servers or tuple(filter(None, (self.gateway,)))) if settings.internet_probes_enabled else ()
+        internet_targets = settings.internet_targets if settings.internet_probes_enabled else ()
+        self.connectivity = ConnectivityCollector(
+            dns_servers,
+            internet_targets,
+            settings.dns_check_name,
+            settings.lan_probe_targets if settings.connectivity_enabled else (),
+        )
         self.snmp = SnmpCollector(
-            settings.snmp_targets, settings.snmp_community, settings.snmp_interface_index, settings.snmp_extra_oids
+            settings.snmp_targets,
+            settings.snmp_community,
+            settings.snmp_interface_index,
+            settings.snmp_extra_oids,
+            version=settings.snmp_version,
+            username=settings.snmp_username,
+            auth_protocol=settings.snmp_auth_protocol,
+            auth_password=settings.snmp_auth_password,
+            priv_protocol=settings.snmp_priv_protocol,
+            priv_password=settings.snmp_priv_password,
+            profile=settings.snmp_profile,
+            timeout=settings.snmp_timeout,
+        )
+        self.prometheus = PrometheusExporterCollector(
+            settings.prometheus_exporter_targets if settings.prometheus_exporters_enabled else (),
+            settings.prometheus_exporter_timeout,
         )
         self.anomaly = AnomalyDetector(database, settings.anomaly_min_samples)
         self.connectivity_latest: dict[str, Any] = {
@@ -46,14 +68,29 @@ class MonitorService:
             "status": "checking" if settings.connectivity_enabled else "disabled",
             "dns_latency_ms": None,
             "internet_latency_ms": None,
+            "lan_latency_ms": None,
+            "lan_status": "checking" if settings.connectivity_enabled and settings.lan_probe_targets else "disabled",
+            "external_status": "checking" if settings.connectivity_enabled and settings.internet_probes_enabled else "disabled",
             "checks": [],
             "updated_at": None,
         }
         self.snmp_latest: dict[str, Any] = {
             "enabled": settings.snmp_enabled,
             "status": "checking" if settings.snmp_enabled else "disabled",
+            "profile": settings.snmp_profile,
+            "security": "authPriv" if settings.snmp_version == "3" else "community",
             "metrics": {},
+            "details": [],
             "targets": list(settings.snmp_targets),
+            "updated_at": None,
+        }
+        self.exporters_latest: dict[str, Any] = {
+            "enabled": settings.prometheus_exporters_enabled,
+            "configured": bool(self.prometheus.targets),
+            "status": "checking" if settings.prometheus_exporters_enabled and self.prometheus.targets else "disabled",
+            "online": 0,
+            "total": len(self.prometheus.targets),
+            "items": [],
             "updated_at": None,
         }
         self.latest: dict[str, Any] = self._empty_snapshot()
@@ -65,6 +102,7 @@ class MonitorService:
         self._last_anomaly_observation = 0.0
         self._connectivity_status = self.connectivity_latest["status"]
         self._snmp_status = self.snmp_latest["status"]
+        self._exporter_status = self.exporters_latest["status"]
 
     async def start(self) -> None:
         if self._running:
@@ -86,6 +124,8 @@ class MonitorService:
                 self._tasks.append(asyncio.create_task(self._connectivity_loop(), name="connectivity-checks"))
             if self.settings.snmp_enabled and self.settings.snmp_targets:
                 self._tasks.append(asyncio.create_task(self._snmp_loop(), name="snmp-collector"))
+            if self.settings.prometheus_exporters_enabled and self.prometheus.targets:
+                self._tasks.append(asyncio.create_task(self._prometheus_loop(), name="prometheus-exporter-collector"))
 
     async def stop(self) -> None:
         self._running = False
@@ -137,7 +177,7 @@ class MonitorService:
                     f"The value is {item['score']:.1f} standard deviations from the learned {item['direction']} pattern.",
                     item,
                 )
-        agents = await self.database.agents(self.settings.agent_offline_after)
+        agents = await self.agent_nodes()
         self.latest = {
             "type": "snapshot",
             "generated_at": time.time(),
@@ -164,6 +204,7 @@ class MonitorService:
             "devices": current_devices,
             "connectivity": self.connectivity_latest,
             "snmp": self.snmp_latest,
+            "exporters": self.exporters_latest,
             "agents": {
                 "configured": bool(self.settings.agent_token),
                 "online": sum(agent["status"] == "online" for agent in agents),
@@ -180,19 +221,41 @@ class MonitorService:
     async def snapshot(self) -> dict[str, Any]:
         snapshot = dict(self.latest)
         snapshot["devices"] = await self.devices()
-        agents = await self.database.agents(self.settings.agent_offline_after)
+        agents = await self.agent_nodes()
         snapshot["agents"] = {
             "configured": bool(self.settings.agent_token),
             "online": sum(agent["status"] == "online" for agent in agents),
             "total": len(agents),
             "items": agents,
         }
+        snapshot["exporters"] = self.exporters_latest
         snapshot["events"] = await self.database.events(12)
         return snapshot
 
     async def devices(self) -> list[dict[str, Any]]:
         items = await self.database.devices()
         return [item for item in items if self._is_monitored_ip(item["ip"])]
+
+    async def agent_nodes(self) -> list[dict[str, Any]]:
+        nodes = await self.database.agents(self.settings.agent_offline_after)
+        return [item for item in nodes if item.get("metadata", {}).get("collection_method") != "prometheus"]
+
+    async def exporter_nodes(self) -> list[dict[str, Any]]:
+        nodes = await self.database.agents(
+            max(self.settings.agent_offline_after, self.settings.prometheus_exporter_interval * 3)
+        )
+        configured = {target.name for target in self.prometheus.targets}
+        return [
+            item
+            for item in nodes
+            if item.get("metadata", {}).get("collection_method") == "prometheus"
+            and item.get("metadata", {}).get("target_name") in configured
+        ]
+
+    async def exporters(self) -> dict[str, Any]:
+        payload = dict(self.exporters_latest)
+        payload["nodes"] = await self.exporter_nodes()
+        return payload
 
     async def _collector_loop(self) -> None:
         while self._running:
@@ -229,16 +292,32 @@ class MonitorService:
                 await self.database.save_connectivity_checks(checks)
                 successful_internet = [item for item in checks if item["check_type"] == "internet" and item["success"]]
                 successful_dns = [item for item in checks if item["check_type"] == "dns" and item["success"]]
+                successful_lan = [item for item in checks if item["check_type"].startswith("lan_") and item["success"]]
                 internet_checks = [item for item in checks if item["check_type"] == "internet"]
                 dns_checks = [item for item in checks if item["check_type"] == "dns"]
+                lan_checks = [item for item in checks if item["check_type"].startswith("lan_")]
                 internet_ok = bool(successful_internet) if internet_checks else True
                 dns_ok = bool(successful_dns) if dns_checks else True
-                status = "online" if internet_ok and dns_ok else ("degraded" if internet_ok or dns_ok else "offline")
+                external_status = (
+                    "online" if internet_ok and dns_ok else ("degraded" if internet_ok or dns_ok else "offline")
+                ) if internet_checks or dns_checks else "disabled"
+                lan_status = (
+                    "online" if len(successful_lan) == len(lan_checks)
+                    else ("degraded" if successful_lan else "offline")
+                ) if lan_checks else "disabled"
+                active_statuses = [item for item in (lan_status, external_status) if item != "disabled"]
+                status = (
+                    "online" if active_statuses and all(item == "online" for item in active_statuses)
+                    else ("offline" if active_statuses and all(item == "offline" for item in active_statuses) else "degraded")
+                ) if active_statuses else "disabled"
                 self.connectivity_latest = {
                     "enabled": True,
                     "status": status,
                     "dns_latency_ms": self._average_latency(successful_dns),
                     "internet_latency_ms": self._average_latency(successful_internet),
+                    "lan_latency_ms": self._average_latency(successful_lan),
+                    "lan_status": lan_status,
+                    "external_status": external_status,
                     "checks": checks,
                     "updated_at": time.time(),
                 }
@@ -247,8 +326,8 @@ class MonitorService:
                     await self.database.add_event(
                         severity,
                         "connectivity",
-                        f"Internet status changed to {status}",
-                        "DNS and external reachability probes changed state.",
+                        f"Network probe status changed to {status}",
+                        "Configured LAN and optional external probes changed state.",
                     )
                 self._connectivity_status = status
             except asyncio.CancelledError:
@@ -266,11 +345,15 @@ class MonitorService:
                 metrics: dict[str, float] = {}
                 for sample in samples:
                     metrics[sample["metric"]] = round(float(sample["value"]), 2)
-                status = "ok" if samples else "unreachable"
+                qnap_warning = any(item.get("status") == "degraded" for item in self.snmp.last_details)
+                status = "degraded" if samples and (errors or qnap_warning) else ("ok" if samples else "unreachable")
                 self.snmp_latest = {
                     "enabled": True,
                     "status": status,
+                    "profile": self.settings.snmp_profile,
+                    "security": "authPriv" if self.settings.snmp_version == "3" else "community",
                     "metrics": metrics,
+                    "details": self.snmp.last_details,
                     "targets": list(self.settings.snmp_targets),
                     "error_count": len(errors),
                     "updated_at": time.time(),
@@ -281,7 +364,7 @@ class MonitorService:
                         severity,
                         "snmp",
                         f"SNMP status changed to {status}",
-                        "Router telemetry collection changed state.",
+                        "Configured SNMP telemetry collection changed state.",
                     )
                 self._snmp_status = status
             except asyncio.CancelledError:
@@ -290,6 +373,54 @@ class MonitorService:
                 self.snmp_latest.update({"status": "error", "updated_at": time.time()})
                 await self.database.add_event("warning", "snmp", "SNMP collection failed", str(exc)[:500])
             await asyncio.sleep(self.settings.snmp_interval)
+
+    async def collect_exporters_once(self) -> dict[str, Any]:
+        samples, statuses = await asyncio.to_thread(self.prometheus.collect)
+        source_hosts = {target.name: target.hostname for target in self.prometheus.targets}
+        for sample in samples:
+            target_name = sample.get("metadata", {}).get("target_name", "")
+            await self.database.upsert_agent(sample, source_hosts.get(target_name, target_name or "unknown"))
+        online = sum(item["status"] == "online" for item in statuses)
+        if not statuses:
+            status = "disabled"
+        elif online == len(statuses):
+            status = "ok"
+        elif online:
+            status = "degraded"
+        else:
+            status = "error"
+        self.exporters_latest = {
+            "enabled": self.settings.prometheus_exporters_enabled,
+            "configured": bool(self.prometheus.targets),
+            "status": status,
+            "online": online,
+            "total": len(statuses),
+            "items": statuses,
+            "updated_at": time.time(),
+        }
+        if status != self._exporter_status and self._exporter_status not in {"checking", "disabled"}:
+            severity = "success" if status == "ok" else "warning"
+            await self.database.add_event(
+                severity,
+                "exporter",
+                f"Prometheus exporter status changed to {status}",
+                f"{online} of {len(statuses)} configured exporters are reachable.",
+            )
+        self._exporter_status = status
+        return self.exporters_latest
+
+    async def _prometheus_loop(self) -> None:
+        while self._running:
+            try:
+                await self.collect_exporters_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self.exporters_latest.update({"status": "error", "updated_at": time.time()})
+                await self.database.add_event(
+                    "warning", "exporter", "Prometheus exporter collection failed", str(exc)[:500]
+                )
+            await asyncio.sleep(self.settings.prometheus_exporter_interval)
 
     @staticmethod
     def _average_latency(checks: list[dict[str, Any]]) -> float | None:
@@ -398,6 +529,7 @@ class MonitorService:
             "network": {"interface": "detecting", "rx_bps": 0, "tx_bps": 0, "gateway": self.gateway, "gateway_latency_ms": None, "packet_loss_percent": 0},
             "summary": {"online_devices": 0, "total_devices": 0, "health_score": 0, "subnet": self.subnet},
             "devices": [], "connectivity": self.connectivity_latest, "snmp": self.snmp_latest,
+            "exporters": self.exporters_latest,
             "agents": {"configured": bool(self.settings.agent_token), "online": 0, "total": 0, "items": []},
             "insights": self.anomaly.last_result, "events": [],
         }

@@ -108,18 +108,23 @@
       <article class="panel horizon-panel">
         <header class="panel-head">
           <div><span class="panel-index">05</span><h2>EXTENDED HORIZON</h2></div>
-          <span class="subnet-label">DNS · SNMP · AGENTS · BEHAVIOR</span>
+          <span class="subnet-label">LAN · EXPORTERS · QNAP · AGENTS · BEHAVIOR</span>
         </header>
         <div class="horizon-grid">
           <section class="horizon-card connectivity-card">
-            <div class="horizon-title"><span class="horizon-icon">◎</span><div><small>OUTSIDE WORLD</small><h3>CONNECTIVITY</h3></div><b class="mini-status checking" id="connectivityStatus">CHECKING</b></div>
-            <div class="horizon-values"><div><span>INTERNET</span><strong id="internetLatency">—</strong></div><div><span>DNS</span><strong id="dnsLatency">—</strong></div></div>
-            <p id="connectivityDetail">外部到達性を確認しています…</p>
+            <div class="horizon-title"><span class="horizon-icon">◎</span><div><small>LOCAL SERVICES</small><h3>LAN PROBES</h3></div><b class="mini-status checking" id="connectivityStatus">CHECKING</b></div>
+            <div class="horizon-values"><div><span>REACHABLE</span><strong id="lanProbeCount">0 / 0</strong></div><div><span>LATENCY</span><strong id="lanLatency">—</strong></div></div>
+            <p id="connectivityDetail">LAN内サービスの到達性を確認しています…</p>
           </section>
-          <section class="horizon-card snmp-card">
-            <div class="horizon-title"><span class="horizon-icon">⌁</span><div><small>ROUTER TELEMETRY</small><h3>SNMP</h3></div><b class="mini-status disabled" id="snmpStatus">DISABLED</b></div>
-            <div class="horizon-values"><div><span>WAN DOWN</span><strong id="snmpDown">—</strong></div><div><span>WAN UP</span><strong id="snmpUp">—</strong></div></div>
-            <p id="snmpDetail">ルーターのSNMP設定を待っています。</p>
+          <section class="horizon-card exporter-card">
+            <div class="horizon-title"><span class="horizon-icon">⌁</span><div><small>HOST SCRAPES</small><h3>PROMETHEUS</h3></div><b class="mini-status disabled" id="exporterStatus">DISABLED</b></div>
+            <div class="horizon-values"><div><span>HOSTS</span><strong id="exporterHosts">0 / 0</strong></div><div><span>SCRAPE</span><strong id="exporterLatency">—</strong></div></div>
+            <p id="exporterDetail">node_exporter / windows_exporterの設定を待っています。</p>
+          </section>
+          <section class="horizon-card qnap-card">
+            <div class="horizon-title"><span class="horizon-icon">▤</span><div><small>NAS STORAGE</small><h3>QNAP SNMP</h3></div><b class="mini-status disabled" id="qnapStatus">DISABLED</b></div>
+            <div class="horizon-values"><div><span>DISKS</span><strong id="qnapDisks">0 / 0</strong></div><div><span>MAX TEMP</span><strong id="qnapTemperature">—</strong></div></div>
+            <p id="qnapDetail">QNAP SNMPv3プロファイルの設定を待っています。</p>
           </section>
           <section class="horizon-card agents-card">
             <div class="horizon-title"><span class="horizon-icon">▣</span><div><small>HOST TELEMETRY</small><h3>AGENT FLEET</h3></div><b class="mini-status" id="agentCount">0 / 0</b></div>

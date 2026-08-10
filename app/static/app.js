@@ -15,9 +15,12 @@
     search: $("deviceSearch"), topology: $("topologyCanvas"), traffic: $("trafficCanvas"),
     dialog: $("deviceDialog"), form: $("deviceForm"), dialogIp: $("dialogIp"), dialogName: $("dialogName"),
     dialogType: $("dialogType"), dialogTrusted: $("dialogTrusted"),
-    connectivityStatus: $("connectivityStatus"), internetLatency: $("internetLatency"), dnsLatency: $("dnsLatency"),
-    connectivityDetail: $("connectivityDetail"), snmpStatus: $("snmpStatus"), snmpDown: $("snmpDown"),
-    snmpUp: $("snmpUp"), snmpDetail: $("snmpDetail"), agentCount: $("agentCount"), agentNodes: $("agentNodes"),
+    connectivityStatus: $("connectivityStatus"), lanProbeCount: $("lanProbeCount"), lanLatency: $("lanLatency"),
+    connectivityDetail: $("connectivityDetail"), exporterStatus: $("exporterStatus"),
+    exporterHosts: $("exporterHosts"), exporterLatency: $("exporterLatency"),
+    exporterDetail: $("exporterDetail"), qnapStatus: $("qnapStatus"), qnapDisks: $("qnapDisks"),
+    qnapTemperature: $("qnapTemperature"), qnapDetail: $("qnapDetail"),
+    agentCount: $("agentCount"), agentNodes: $("agentNodes"),
     agentDetail: $("agentDetail"), agentSetupButton: $("agentSetupButton"), agentSetupDialog: $("agentSetupDialog"),
     agentSetupClose: $("agentSetupClose"), agentSetupTokenStatus: $("agentSetupTokenStatus"),
     windowsInstallCommand: $("windowsInstallCommand"), linuxInstallCommand: $("linuxInstallCommand"),
@@ -244,18 +247,50 @@
 
   function renderHorizon(snapshot) {
     const connectivity = snapshot.connectivity || { status: "checking", checks: [] };
-    setMiniStatus(elements.connectivityStatus, connectivity.status);
-    elements.internetLatency.textContent = connectivity.internet_latency_ms == null ? "—" : `${Number(connectivity.internet_latency_ms).toFixed(1)} ms`;
-    elements.dnsLatency.textContent = connectivity.dns_latency_ms == null ? "—" : `${Number(connectivity.dns_latency_ms).toFixed(1)} ms`;
-    const successfulChecks = (connectivity.checks || []).filter((item) => item.success).length;
-    const totalChecks = (connectivity.checks || []).length;
-    elements.connectivityDetail.textContent = connectivity.status === "online" ? `${totalChecks}経路中${successfulChecks}経路が正常です。` : connectivity.status === "disabled" ? "外部疎通チェックは無効です。" : `${totalChecks}経路中${successfulChecks}経路が応答しています。`;
+    setMiniStatus(elements.connectivityStatus, connectivity.lan_status || "disabled");
+    const lanChecks = (connectivity.checks || []).filter((item) => String(item.check_type || "").startsWith("lan_"));
+    const successfulChecks = lanChecks.filter((item) => item.success).length;
+    elements.lanProbeCount.textContent = `${successfulChecks} / ${lanChecks.length}`;
+    elements.lanLatency.textContent = connectivity.lan_latency_ms == null ? "—" : `${Number(connectivity.lan_latency_ms).toFixed(1)} ms`;
+    elements.connectivityDetail.textContent = connectivity.lan_status === "online" ? `${lanChecks.length}件のLAN内サービスが正常です。` : connectivity.lan_status === "disabled" ? "LANプローブは未設定です。" : `${lanChecks.length}件中${successfulChecks}件が応答しています。`;
 
-    const snmp = snapshot.snmp || { status: "disabled", metrics: {} };
-    setMiniStatus(elements.snmpStatus, snmp.status);
-    elements.snmpDown.textContent = snmp.metrics?.wan_rx_bps == null ? "—" : formatRate(snmp.metrics.wan_rx_bps);
-    elements.snmpUp.textContent = snmp.metrics?.wan_tx_bps == null ? "—" : formatRate(snmp.metrics.wan_tx_bps);
-    elements.snmpDetail.textContent = snmp.status === "ok" ? `${(snmp.targets || []).length}台のSNMPテレメトリを受信中です。` : snmp.status === "unreachable" ? "SNMP応答がありません。設定を確認してください。" : "ルーターのSNMP設定を待っています。";
+    const exporters = snapshot.exporters || { status: "disabled", online: 0, total: 0, items: [] };
+    setMiniStatus(elements.exporterStatus, exporters.status);
+    elements.exporterHosts.textContent = `${exporters.online || 0} / ${exporters.total || 0}`;
+    const successfulExporters = (exporters.items || []).filter((item) => item.status === "online");
+    const averageScrape = successfulExporters.length
+      ? successfulExporters.reduce((sum, item) => sum + Number(item.duration_ms || 0), 0) / successfulExporters.length
+      : null;
+    elements.exporterLatency.textContent = averageScrape == null ? "—" : `${averageScrape.toFixed(0)} ms`;
+    if (exporters.status === "ok") {
+      elements.exporterDetail.textContent = `${exporters.online}台のホストメトリクスを直接収集中です。`;
+    } else if (exporters.status === "degraded" || exporters.status === "error") {
+      const failed = (exporters.items || []).filter((item) => item.status !== "online").map((item) => item.name).slice(0, 2);
+      elements.exporterDetail.textContent = `${failed.join("、") || "Exporter"}から取得できません。`;
+    } else {
+      elements.exporterDetail.textContent = "node_exporter / windows_exporterの設定を待っています。";
+    }
+
+    const snmp = snapshot.snmp || { status: "disabled", details: [] };
+    const qnapTargets = (snmp.details || []).filter((item) => item.profile === "qnap");
+    const qnap = qnapTargets[0];
+    const qnapStatus = qnap?.status === "degraded" || snmp.status === "degraded" ? "degraded" : qnap ? "online" : snmp.profile === "qnap" ? snmp.status : "disabled";
+    setMiniStatus(elements.qnapStatus, qnapStatus);
+    const disks = qnap?.disks || [];
+    const healthyStates = new Set(["good", "ready", "normal", "ok", "active", "optimal"]);
+    const healthyDisks = disks.filter((disk) => healthyStates.has(String(disk.status || "").toLowerCase())).length;
+    const temperatures = disks.map((disk) => Number(disk.temperature_celsius)).filter(Number.isFinite);
+    elements.qnapDisks.textContent = `${healthyDisks} / ${disks.length}`;
+    elements.qnapTemperature.textContent = temperatures.length ? `${Math.max(...temperatures).toFixed(0)}°C` : "—";
+    if (qnap) {
+      const identity = qnap.identity || {};
+      const storageSummary = `${qnap.raids?.length || 0} RAID · ${qnap.storage_pools?.length || 0} POOL · ${qnap.volumes?.length || 0} VOL`;
+      elements.qnapDetail.textContent = `${identity.hostname || identity.model || "QNAP"} · ${storageSummary}${qnap.warnings?.length ? ` · ${qnap.warnings.length}件の注意` : ""}`;
+    } else if (snmp.profile === "qnap" && ["unreachable", "error"].includes(snmp.status)) {
+      elements.qnapDetail.textContent = "QNAPへ接続できません。SNMPv3のユーザー・認証方式・CBC-DES設定を確認してください。";
+    } else {
+      elements.qnapDetail.textContent = "QNAP SNMPv3プロファイルの設定を待っています。";
+    }
 
     const agents = snapshot.agents || { online: 0, total: 0, items: [] };
     elements.agentCount.textContent = `${agents.online || 0} / ${agents.total || 0}`;
