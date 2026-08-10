@@ -6,6 +6,17 @@
   <meta name="theme-color" content="#07110f">
   <meta name="description" content="NetPulse — 自宅ネットワークのリアルタイム・オブザーバビリティ画面">
   <title>NetPulse // Home Network Observatory</title>
+  <script>
+    (() => {
+      const sizes = ["small", "medium", "large"];
+      try {
+        const stored = localStorage.getItem("netpulse.fontSize");
+        document.documentElement.dataset.fontSize = sizes.includes(stored) ? stored : "medium";
+      } catch (_) {
+        document.documentElement.dataset.fontSize = "medium";
+      }
+    })();
+  </script>
   <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
@@ -19,6 +30,12 @@
       <span><strong>NETPULSE</strong><small>HOME NETWORK OBSERVATORY</small></span>
     </a>
     <div class="topbar-status">
+      <div class="font-size-control" role="group" aria-label="文字サイズ">
+        <span>文字サイズ</span>
+        <button type="button" data-font-size="small" aria-label="文字サイズ 小">小</button>
+        <button type="button" data-font-size="medium" aria-label="文字サイズ 中">中</button>
+        <button type="button" data-font-size="large" aria-label="文字サイズ 大">大</button>
+      </div>
       <button class="topbar-action" id="llmSettingsButton" type="button">LLM SETTINGS</button>
       <div class="live-pill" id="connectionPill"><span></span><b>CONNECTING</b></div>
       <time id="clock">--:--:--</time>
@@ -29,82 +46,101 @@
     <section class="intro">
       <div>
         <p class="eyebrow">LIVE NETWORK TELEMETRY</p>
+        <div class="intro-signal" aria-hidden="true"><i></i><i></i><i></i><span>SPATIAL OBSERVATION DECK</span></div>
       </div>
       <p class="intro-copy">接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。</p>
     </section>
 
-    <section class="dashboard-grid">
+    <section class="command-deck" aria-label="ネットワーク概要">
       <article class="panel topology-panel">
         <header class="panel-head">
           <div><span class="panel-index">01</span><h2>NETWORK CONSTELLATION</h2></div>
-          <span class="subnet-label" id="subnetLabel">SUBNET · DETECTING</span>
+          <div class="topology-head-status"><span class="render-mode" id="topologyRenderMode">WEBGL · STARTING</span><span class="subnet-label" id="subnetLabel">SUBNET · DETECTING</span></div>
         </header>
-        <div class="topology-stage">
-          <canvas id="topologyCanvas" aria-label="ネットワーク端末の接続図"></canvas>
-          <div class="topology-center-label">
-            <small>GATEWAY</small>
-            <strong id="gatewayLabel">—</strong>
-            <span><i></i><b id="gatewayLatency">-- ms</b></span>
+        <div class="topology-stage" id="topologyStage">
+          <canvas id="topologyCanvas" aria-label="3Dネットワーク端末接続図"></canvas>
+          <div class="topology-reticle" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+          <div class="topology-label-layer" id="topologyLabelLayer" aria-label="ネットワークノード"></div>
+          <div class="topology-scene-meta">
+            <span>CLIENT RENDERED</span>
+            <b id="topologyNodeCount">0 NODES</b>
           </div>
-          <div class="topology-legend"><span><i class="dot-online"></i>ONLINE</span><span><i class="dot-offline"></i>OFFLINE</span><span><i class="dot-flow"></i>DATA FLOW</span></div>
+          <aside class="topology-inspector" id="topologyInspector" aria-live="polite">
+            <header>
+              <div><small id="topologyNodeRole">OBSERVER NODE</small><strong id="topologyNodeTitle">RP5 MONITOR</strong><span id="topologyNodeSubtitle">テレメトリを取得しています</span></div>
+              <b class="node-state checking" id="topologyNodeState">CHECKING</b>
+            </header>
+            <div class="topology-node-metrics" id="topologyNodeMetrics"><span><small>STATUS</small><b>WAITING</b></span></div>
+            <p id="topologyNodeDescription">ノードを選択すると、取得できる主要メトリクスを表示します。</p>
+            <button id="topologyProfileButton" type="button" hidden>OPEN DEVICE PROFILE</button>
+          </aside>
+          <div class="topology-legend"><span><i class="dot-online"></i>ONLINE</span><span><i class="dot-warning"></i>DEGRADED</span><span><i class="dot-offline"></i>OFFLINE</span><span><i class="dot-flow"></i>TELEMETRY FLOW</span></div>
         </div>
       </article>
 
-      <aside class="panel health-panel">
-        <header class="panel-head">
-          <div><span class="panel-index">02</span><h2>NETWORK VITALS</h2></div>
-        </header>
-        <div class="health-wrap">
-          <div class="health-orbit">
-            <svg class="health-ring" viewBox="0 0 160 160" role="img" aria-label="ネットワーク健全性スコア">
-              <circle class="ring-track" cx="80" cy="80" r="66"></circle>
-              <circle class="ring-value" id="healthRing" cx="80" cy="80" r="66"></circle>
-            </svg>
-            <div class="health-value"><strong id="healthScore">--</strong><small>HEALTH</small></div>
+      <div class="command-rail">
+        <aside class="panel health-panel">
+          <header class="panel-head">
+            <div><span class="panel-index">02</span><h2>NETWORK VITALS</h2></div>
+          </header>
+          <div class="health-command-body">
+            <div class="health-wrap">
+              <div class="health-orbit">
+                <svg class="health-ring" viewBox="0 0 160 160" role="img" aria-label="ネットワーク健全性スコア">
+                  <circle class="ring-track" cx="80" cy="80" r="66"></circle>
+                  <circle class="ring-value" id="healthRing" cx="80" cy="80" r="66"></circle>
+                </svg>
+                <div class="health-value"><strong id="healthScore">--</strong><small>HEALTH</small></div>
+              </div>
+              <p class="health-message" id="healthMessage">テレメトリを取得しています…</p>
+            </div>
+            <div class="vital-list">
+              <div class="vital-item"><span>ONLINE DEVICES</span><strong><b id="onlineDevices">0</b><small id="totalDevices"> / 0</small></strong></div>
+              <div class="vital-item"><span>GATEWAY</span><strong id="gatewayLabel">—</strong></div>
+              <div class="vital-item"><span>LATENCY</span><strong id="gatewayLatency">-- ms</strong></div>
+              <div class="vital-item"><span>PACKET LOSS</span><strong id="packetLoss">0.0%</strong></div>
+              <div class="vital-item"><span>INTERFACE</span><strong id="interfaceName">—</strong></div>
+              <div class="vital-item"><span>UPTIME</span><strong id="uptime">—</strong></div>
+            </div>
           </div>
-          <p class="health-message" id="healthMessage">テレメトリを取得しています…</p>
-        </div>
-        <div class="vital-list">
-          <div class="vital-item"><span>ONLINE DEVICES</span><strong><b id="onlineDevices">0</b><small id="totalDevices"> / 0</small></strong></div>
-          <div class="vital-item"><span>PACKET LOSS</span><strong id="packetLoss">0.0%</strong></div>
-          <div class="vital-item"><span>INTERFACE</span><strong id="interfaceName">—</strong></div>
-          <div class="vital-item"><span>UPTIME</span><strong id="uptime">—</strong></div>
-        </div>
-      </aside>
+        </aside>
 
-      <article class="panel traffic-panel">
-        <header class="panel-head">
-          <div><span class="panel-index">03</span><h2>TRAFFIC STREAM</h2></div>
-          <div class="traffic-values">
-            <span class="download"><i>↓</i><b id="downloadRate">0 bps</b></span>
-            <span class="upload"><i>↑</i><b id="uploadRate">0 bps</b></span>
-          </div>
-        </header>
-        <div class="chart-wrap"><canvas id="trafficCanvas" aria-label="直近の受信・送信速度グラフ"></canvas></div>
-        <div class="chart-axis"><span>60 SEC AGO</span><span>NOW</span></div>
-      </article>
+        <article class="panel traffic-panel">
+          <header class="panel-head">
+            <div><span class="panel-index">03</span><h2>TRAFFIC STREAM</h2></div>
+            <div class="traffic-values">
+              <span class="download"><i>↓</i><b id="downloadRate">0 bps</b></span>
+              <span class="upload"><i>↑</i><b id="uploadRate">0 bps</b></span>
+            </div>
+          </header>
+          <div class="chart-wrap"><canvas id="trafficCanvas" aria-label="直近の受信・送信速度グラフ"></canvas></div>
+          <div class="chart-axis"><span>60 SEC AGO</span><span>NOW</span></div>
+        </article>
 
-      <article class="panel system-panel">
-        <header class="panel-head">
-          <div><span class="panel-index">04</span><h2>PI SYSTEM PULSE</h2></div>
-          <span class="temperature"><i>●</i><b id="temperature">--°C</b></span>
-        </header>
-        <div class="system-metrics">
-          <div class="system-metric" data-metric="cpu">
-            <div class="metric-top"><span>CPU</span><strong id="cpuValue">0%</strong></div>
-            <div class="bar"><i id="cpuBar"></i></div><small id="cpuDetail">LOAD —</small>
+        <article class="panel system-panel">
+          <header class="panel-head">
+            <div><span class="panel-index">04</span><h2>PI SYSTEM PULSE</h2></div>
+            <span class="temperature"><i>●</i><b id="temperature">--°C</b></span>
+          </header>
+          <div class="system-metrics">
+            <div class="system-metric" data-metric="cpu">
+              <div class="metric-top"><span>CPU</span><strong id="cpuValue">0%</strong></div>
+              <div class="bar"><i id="cpuBar"></i></div><small id="cpuDetail">LOAD —</small>
+            </div>
+            <div class="system-metric" data-metric="memory">
+              <div class="metric-top"><span>MEMORY</span><strong id="memoryValue">0%</strong></div>
+              <div class="bar"><i id="memoryBar"></i></div><small id="memoryDetail">— / —</small>
+            </div>
+            <div class="system-metric" data-metric="disk">
+              <div class="metric-top"><span>STORAGE</span><strong id="diskValue">0%</strong></div>
+              <div class="bar"><i id="diskBar"></i></div><small id="diskDetail">— / —</small>
+            </div>
           </div>
-          <div class="system-metric" data-metric="memory">
-            <div class="metric-top"><span>MEMORY</span><strong id="memoryValue">0%</strong></div>
-            <div class="bar"><i id="memoryBar"></i></div><small id="memoryDetail">— / —</small>
-          </div>
-          <div class="system-metric" data-metric="disk">
-            <div class="metric-top"><span>STORAGE</span><strong id="diskValue">0%</strong></div>
-            <div class="bar"><i id="diskBar"></i></div><small id="diskDetail">— / —</small>
-          </div>
-        </div>
-      </article>
+        </article>
+      </div>
+    </section>
 
+    <section class="dashboard-grid">
       <article class="panel horizon-panel">
         <header class="panel-head">
           <div><span class="panel-index">05</span><h2>EXTENDED HORIZON</h2></div>
@@ -238,6 +274,7 @@
     </form>
   </dialog>
 
+  <script src="/static/topology3d.js" defer></script>
   <script src="/static/app.js" defer></script>
 </body>
 </html>

@@ -13,6 +13,12 @@
     disk: $("diskValue"), diskBar: $("diskBar"), diskDetail: $("diskDetail"),
     deviceRows: $("deviceRows"), eventList: $("eventList"), eventCount: $("eventCount"),
     search: $("deviceSearch"), topology: $("topologyCanvas"), traffic: $("trafficCanvas"),
+    topologyStage: $("topologyStage"), topologyLabelLayer: $("topologyLabelLayer"),
+    topologyRenderMode: $("topologyRenderMode"), topologyNodeCount: $("topologyNodeCount"),
+    topologyNodeRole: $("topologyNodeRole"), topologyNodeTitle: $("topologyNodeTitle"),
+    topologyNodeSubtitle: $("topologyNodeSubtitle"), topologyNodeState: $("topologyNodeState"),
+    topologyNodeMetrics: $("topologyNodeMetrics"), topologyNodeDescription: $("topologyNodeDescription"),
+    topologyProfileButton: $("topologyProfileButton"),
     dialog: $("deviceDialog"), form: $("deviceForm"), dialogIp: $("dialogIp"), dialogName: $("dialogName"),
     dialogType: $("dialogType"), dialogTrusted: $("dialogTrusted"),
     connectivityStatus: $("connectivityStatus"), lanProbeCount: $("lanProbeCount"), lanLatency: $("lanLatency"),
@@ -40,8 +46,12 @@
 
   const state = {
     snapshot: null, devices: [], rx: [], tx: [], filter: "all", search: "", selectedIp: null,
-    topologyNodes: [], particles: [], socket: null, reconnectTimer: null, reports: [], llmSettings: null,
+    topologyNodes: [], topologyScene: null, selectedTopologyNode: null,
+    socket: null, reconnectTimer: null, reports: [], llmSettings: null,
   };
+  const fontSizeKey = "netpulse.fontSize";
+  const fontSizes = new Set(["small", "medium", "large"]);
+  const fontSizeButtons = [...document.querySelectorAll("[data-font-size]")];
   const maxPoints = 60;
   const typeIcons = { router: "⌁", computer: "▣", phone: "▯", tablet: "▭", tv: "▰", iot: "◇", server: "▤", printer: "▥", camera: "◉", game: "✦", unknown: "?" };
 
@@ -76,6 +86,30 @@
     return `${Math.floor(seconds / 86400)}D AGO`;
   };
   const formatDateTime = (timestamp) => timestamp ? new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium", timeStyle: "short" }).format(new Date(Number(timestamp) * 1000)) : "—";
+  const finiteNumber = (value) => value == null || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
+  const metric = (label, value) => value == null || value === "" ? null : ({ label, value: String(value) });
+  const percentMetric = (label, value) => {
+    const number = finiteNumber(value);
+    return number == null ? null : metric(label, `${number.toFixed(number >= 10 ? 0 : 1)}%`);
+  };
+  const temperatureMetric = (label, value) => {
+    const number = finiteNumber(value);
+    return number == null ? null : metric(label, `${number.toFixed(0)}°C`);
+  };
+  const compactMetrics = (...values) => values.filter(Boolean);
+
+  function applyFontSize(requestedSize, persist = true) {
+    const size = fontSizes.has(requestedSize) ? requestedSize : "medium";
+    document.documentElement.dataset.fontSize = size;
+    fontSizeButtons.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.fontSize === size)));
+    if (persist) {
+      try { localStorage.setItem(fontSizeKey, size); } catch (_) { /* Storage can be disabled. */ }
+    }
+    window.dispatchEvent(new Event("resize"));
+  }
+
+  applyFontSize(document.documentElement.dataset.fontSize || "medium", false);
+  fontSizeButtons.forEach((button) => button.addEventListener("click", () => applyFontSize(button.dataset.fontSize)));
 
   async function apiError(response) {
     try {
@@ -118,6 +152,7 @@
     updateMetric("disk", system.disk_percent, `${formatBytes(system.disk_used)} / ${formatBytes(system.disk_total)}`);
 
     pushPoint(network.rx_bps, network.tx_bps);
+    drawTraffic();
     renderDevices();
     renderEvents(snapshot.events || []);
     renderHorizon(snapshot);
@@ -323,12 +358,136 @@
     }
   }
 
+  function topologyStatusClass(status) {
+    const value = String(status || "unknown").toLowerCase();
+    if (["error", "critical", "anomaly"].includes(value)) return "error";
+    if (["warning", "degraded", "checking", "learning"].includes(value)) return "warning";
+    if (["offline", "unreachable", "disabled", "unknown"].includes(value)) return "offline";
+    return "online";
+  }
+
+  function renderTopologyInspector(node) {
+    if (!node) return;
+    state.selectedTopologyNode = node;
+    elements.topologyNodeRole.textContent = `${String(node.role || "node").toUpperCase()} NODE`;
+    elements.topologyNodeTitle.textContent = node.title || "UNKNOWN NODE";
+    elements.topologyNodeSubtitle.textContent = node.subtitle || "—";
+    const statusClass = topologyStatusClass(node.status);
+    elements.topologyNodeState.className = `node-state ${statusClass}`;
+    elements.topologyNodeState.textContent = String(node.status || "unknown").toUpperCase();
+    elements.topologyNodeMetrics.replaceChildren();
+    (node.metrics?.length ? node.metrics : [metric("STATUS", String(node.status || "unknown").toUpperCase())]).slice(0, 6).forEach((item) => {
+      const wrapper = document.createElement("span");
+      const label = document.createElement("small");
+      const value = document.createElement("b");
+      label.textContent = item.label;
+      value.textContent = item.value;
+      wrapper.append(label, value);
+      elements.topologyNodeMetrics.append(wrapper);
+    });
+    elements.topologyNodeDescription.textContent = node.description || "このノードから取得できる監視値を表示しています。";
+    elements.topologyProfileButton.hidden = node.kind !== "device" || !node.ip;
+  }
+
   function updateTopologyNodes() {
-    const onlineFirst = [...state.devices].sort((a, b) => Number(b.status === "online") - Number(a.status === "online"));
-    state.topologyNodes = onlineFirst.slice(0, 12);
-    const particleTarget = Math.min(28, state.topologyNodes.filter((device) => device.status === "online").length * 3);
-    while (state.particles.length < particleTarget) state.particles.push({ node: state.particles.length % Math.max(1, state.topologyNodes.length), progress: Math.random(), speed: .002 + Math.random() * .004, reverse: Math.random() > .65 });
-    state.particles.length = particleTarget;
+    const snapshot = state.snapshot || {};
+    const system = snapshot.system || {};
+    const network = snapshot.network || {};
+    const summary = snapshot.summary || {};
+    const nodes = [];
+    const representedIps = new Set();
+    const health = finiteNumber(summary.health_score);
+    const coreStatus = health == null ? "checking" : health >= 85 ? "online" : health >= 65 ? "degraded" : "error";
+
+    nodes.push({
+      id: "core:rp5", role: "core", kind: "system", status: coreStatus,
+      title: "RP5 OBSERVER", subtitle: `${String(network.interface || "LOCAL NODE").toUpperCase()} · ${summary.subnet || "SUBNET DETECTING"}`,
+      metrics: compactMetrics(
+        percentMetric("CPU", system.cpu_percent), percentMetric("MEM", system.memory_percent),
+        percentMetric("DISK", system.disk_percent), temperatureMetric("TEMP", system.temperature_c),
+        metric("RX", formatRate(network.rx_bps)), metric("TX", formatRate(network.tx_bps)),
+      ),
+      description: "NetPulseを実行するRaspberry Pi 5です。主要なシステム負荷と、この監視ノード自身のNIC通信量を表示しています。",
+    });
+
+    if (network.gateway) {
+      representedIps.add(network.gateway);
+      const snmpMetrics = snapshot.snmp?.metrics || {};
+      const gatewayOnline = network.gateway_latency_ms != null;
+      nodes.push({
+        id: `gateway:${network.gateway}`, role: "gateway", kind: "gateway", status: gatewayOnline ? "online" : "offline",
+        title: "NETWORK GATEWAY", subtitle: network.gateway,
+        metrics: compactMetrics(
+          metric("LATENCY", network.gateway_latency_ms == null ? "NO RESPONSE" : `${Number(network.gateway_latency_ms).toFixed(1)} ms`),
+          metric("LOSS", `${Number(network.packet_loss_percent || 0).toFixed(1)}%`),
+          snmpMetrics.wan_rx_bps == null ? null : metric("WAN RX", formatRate(snmpMetrics.wan_rx_bps)),
+          snmpMetrics.wan_tx_bps == null ? null : metric("WAN TX", formatRate(snmpMetrics.wan_tx_bps)),
+        ),
+        description: "デフォルトゲートウェイの到達性です。WAN通信量はルーターSNMPで取得できた場合だけ表示します。",
+      });
+    }
+
+    (snapshot.snmp?.details || []).filter((item) => item.profile === "qnap").slice(0, 2).forEach((qnap, index) => {
+      const qnapSystem = qnap.system || {};
+      const identity = qnap.identity || {};
+      const memoryTotal = finiteNumber(qnapSystem.memory_total_bytes);
+      const memoryUsed = finiteNumber(qnapSystem.memory_used_bytes);
+      const memoryPercent = memoryTotal && memoryUsed != null ? memoryUsed / memoryTotal * 100 : null;
+      const diskTemperatures = (qnap.disks || []).map((disk) => finiteNumber(disk.temperature_celsius)).filter((value) => value != null);
+      const warnings = qnap.warnings?.length || 0;
+      if (qnap.target) representedIps.add(qnap.target);
+      nodes.push({
+        id: `qnap:${qnap.target || index}`, role: "qnap", kind: "qnap", status: warnings ? "degraded" : (qnap.status || "online"),
+        title: identity.hostname || identity.model || "QNAP NAS", subtitle: [identity.model, qnap.target].filter(Boolean).join(" · "),
+        metrics: compactMetrics(
+          percentMetric("CPU", qnapSystem.cpu_percent), percentMetric("MEM", memoryPercent),
+          temperatureMetric("CPU TEMP", qnapSystem.cpu_temperature_celsius),
+          temperatureMetric("DISK TEMP", diskTemperatures.length ? Math.max(...diskTemperatures) : null),
+          metric("DISKS", String(qnap.disks?.length || 0)), metric("WARN", String(warnings)),
+        ),
+        description: `${qnap.raids?.length || 0} RAID、${qnap.storage_pools?.length || 0}プール、${qnap.volumes?.length || 0}ボリュームをSNMPで観測しています。`,
+      });
+    });
+
+    const appendHostNode = (host, role, index) => {
+      const ip = host.source_ip || host.metadata?.hostname || "";
+      if (ip) representedIps.add(ip);
+      nodes.push({
+        id: `${role}:${host.node_id || host.hostname || index}`, role, kind: "host", status: host.status || "unknown",
+        title: host.hostname || host.node_id || role.toUpperCase(),
+        subtitle: [host.os_name, ip].filter(Boolean).join(" · "),
+        metrics: compactMetrics(
+          percentMetric("CPU", host.cpu_percent), percentMetric("MEM", host.memory_percent),
+          percentMetric("DISK", host.disk_percent), temperatureMetric("TEMP", host.temperature_c),
+          metric("RX", formatRate(host.rx_bps)), metric("TX", formatRate(host.tx_bps)),
+        ),
+        description: role === "agent" ? "署名付きホストエージェントから受信した内部メトリクスです。" : "Prometheus Exporterから取得したホストメトリクスです。",
+      });
+    };
+    (snapshot.agents?.items || []).slice(0, 6).forEach((host, index) => appendHostNode(host, "agent", index));
+    (snapshot.exporters?.nodes || []).slice(0, 6).forEach((host, index) => appendHostNode(host, "exporter", index));
+
+    const remainingSlots = Math.max(0, 18 - nodes.length);
+    [...state.devices]
+      .filter((device) => !representedIps.has(device.ip))
+      .sort((first, second) => Number(second.status === "online") - Number(first.status === "online"))
+      .slice(0, remainingSlots)
+      .forEach((device) => {
+        nodes.push({
+          id: `device:${device.ip}`, role: "device", kind: "device", status: device.status || "unknown", ip: device.ip,
+          title: device.display_name || device.hostname || device.ip, subtitle: `${String(device.device_type || "unknown").toUpperCase()} · ${device.ip}`,
+          metrics: compactMetrics(
+            metric("LATENCY", device.latency_ms == null ? "—" : `${Number(device.latency_ms).toFixed(1)} ms`),
+            metric("SEEN", relativeTime(device.last_seen)), metric("TRUST", device.is_trusted ? "TRUSTED" : "UNSET"),
+          ),
+          description: "LAN探索で検出した端末です。CPUやメモリはエージェントまたはExporterを導入した場合だけ取得できます。",
+        });
+      });
+
+    state.topologyNodes = nodes;
+    const liveCount = nodes.filter((node) => topologyStatusClass(node.status) === "online").length;
+    elements.topologyNodeCount.textContent = `${liveCount} LIVE / ${nodes.length} NODES`;
+    state.topologyScene?.setNodes(nodes);
   }
 
   function sizeCanvas(canvas) {
@@ -340,57 +499,6 @@
     const context = canvas.getContext("2d");
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     return { context, width: rect.width, height: rect.height };
-  }
-
-  function drawTopology(now) {
-    const { context: ctx, width, height } = sizeCanvas(elements.topology);
-    ctx.clearRect(0, 0, width, height);
-    const cx = width / 2, cy = height / 2;
-    const count = Math.max(1, state.topologyNodes.length);
-    const radiusX = Math.min(width * .39, 350), radiusY = Math.min(height * .36, 145);
-    const positions = [];
-
-    ctx.strokeStyle = "rgba(156,255,206,.055)"; ctx.lineWidth = 1;
-    for (let radius = 48; radius < Math.max(radiusX, radiusY) + 45; radius += 48) {
-      ctx.beginPath(); ctx.ellipse(cx, cy, Math.min(radius, radiusX), Math.min(radius * .55, radiusY), 0, 0, Math.PI * 2); ctx.stroke();
-    }
-    ctx.setLineDash([3, 7]);
-    state.topologyNodes.forEach((device, index) => {
-      const angle = -Math.PI / 2 + (index / count) * Math.PI * 2;
-      const stagger = 1 + ((index % 3) - 1) * .09;
-      const x = cx + Math.cos(angle) * radiusX * stagger;
-      const y = cy + Math.sin(angle) * radiusY * stagger;
-      positions.push({ x, y });
-      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(x, y);
-      ctx.strokeStyle = device.status === "online" ? "rgba(156,255,206,.18)" : "rgba(110,130,122,.1)"; ctx.stroke();
-    });
-    ctx.setLineDash([]);
-
-    const corePulse = 2 + Math.sin(now / 450) * 2;
-    ctx.beginPath(); ctx.arc(cx, cy, 52 + corePulse, 0, Math.PI * 2); ctx.fillStyle = "rgba(156,255,206,.035)"; ctx.fill();
-    ctx.beginPath(); ctx.arc(cx, cy, 43, 0, Math.PI * 2); ctx.strokeStyle = "rgba(156,255,206,.42)"; ctx.lineWidth = 1; ctx.stroke();
-    ctx.beginPath(); ctx.arc(cx, cy, 35, 0, Math.PI * 2); ctx.fillStyle = "rgba(10,28,23,.95)"; ctx.fill();
-
-    state.particles.forEach((particle) => {
-      if (!positions.length) return;
-      particle.node %= positions.length;
-      particle.progress = (particle.progress + particle.speed) % 1;
-      const target = positions[particle.node];
-      const progress = particle.reverse ? 1 - particle.progress : particle.progress;
-      const x = cx + (target.x - cx) * progress, y = cy + (target.y - cy) * progress;
-      ctx.beginPath(); ctx.arc(x, y, 1.7, 0, Math.PI * 2); ctx.fillStyle = particle.reverse ? "#a78bfa" : "#9cffce"; ctx.shadowBlur = 9; ctx.shadowColor = ctx.fillStyle; ctx.fill(); ctx.shadowBlur = 0;
-    });
-
-    state.topologyNodes.forEach((device, index) => {
-      const { x, y } = positions[index];
-      const online = device.status === "online";
-      ctx.beginPath(); ctx.arc(x, y, 18, 0, Math.PI * 2); ctx.fillStyle = online ? "rgba(12,31,26,.96)" : "rgba(14,20,18,.96)"; ctx.fill();
-      ctx.strokeStyle = online ? "rgba(156,255,206,.5)" : "rgba(100,120,112,.28)"; ctx.stroke();
-      ctx.fillStyle = online ? "#9cffce" : "#66756f"; ctx.font = "12px Consolas, monospace"; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(typeIcons[device.device_type] || "?", x, y);
-      const label = String(device.display_name || device.hostname || device.ip).slice(0, 18);
-      ctx.font = "9px Segoe UI, sans-serif"; ctx.fillStyle = online ? "#d7e9e0" : "#6f7f78"; ctx.textBaseline = "top"; ctx.fillText(label, x, y + 25);
-      ctx.font = "7px Consolas, monospace"; ctx.fillStyle = "#61736c"; ctx.fillText(device.ip || "", x, y + 38);
-    });
   }
 
   function drawTraffic() {
@@ -412,8 +520,6 @@
     drawSeries(state.rx, "#9cffce", "rgba(156,255,206,.12)");
     drawSeries(state.tx, "#a78bfa", "rgba(167,139,250,.06)");
   }
-
-  function animate(now) { drawTopology(now); drawTraffic(); requestAnimationFrame(animate); }
 
   async function loadInitial() {
     try {
@@ -484,6 +590,9 @@
     button.classList.add("active"); state.filter = button.dataset.filter; renderDevices();
   }));
   elements.deviceRows.addEventListener("click", (event) => { const row = event.target.closest("tr[data-ip]"); if (row) openDevice(row.dataset.ip); });
+  elements.topologyProfileButton.addEventListener("click", () => {
+    if (state.selectedTopologyNode?.ip) openDevice(state.selectedTopologyNode.ip);
+  });
   elements.agentSetupButton.addEventListener("click", openAgentSetup);
   document.querySelectorAll(".agent-copy-button").forEach((button) => button.addEventListener("click", () => copyAgentCommand(button)));
   elements.form.addEventListener("submit", async (event) => {
@@ -493,7 +602,7 @@
       method: "PATCH", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ display_name: elements.dialogName.value.trim() || null, device_type: elements.dialogType.value, is_trusted: elements.dialogTrusted.checked }),
     });
-    if (response.ok) { const updated = await response.json(); state.devices = state.devices.map((item) => item.ip === updated.ip ? { ...item, ...updated, is_trusted: Boolean(updated.is_trusted) } : item); renderDevices(); elements.dialog.close(); }
+    if (response.ok) { const updated = await response.json(); state.devices = state.devices.map((item) => item.ip === updated.ip ? { ...item, ...updated, is_trusted: Boolean(updated.is_trusted) } : item); renderDevices(); updateTopologyNodes(); elements.dialog.close(); }
   });
 
   elements.llmSettingsButton.addEventListener("click", openLLMSettings);
@@ -558,13 +667,27 @@
     }
   });
 
+  state.topologyScene = window.NetPulseTopology3D?.create({
+    canvas: elements.topology,
+    labelLayer: elements.topologyLabelLayer,
+    onSelect: renderTopologyInspector,
+    onModeChange: (mode) => {
+      const fallback = mode !== "webgl";
+      elements.topologyRenderMode.className = `render-mode${fallback ? " fallback" : ""}`;
+      elements.topologyRenderMode.textContent = fallback ? "2D · SAFE MODE" : "WEBGL · ACTIVE";
+    },
+  }) || null;
+  if (!state.topologyScene) {
+    elements.topologyRenderMode.className = "render-mode fallback";
+    elements.topologyRenderMode.textContent = "RENDERER · OFFLINE";
+  }
+
   window.setInterval(() => { elements.clock.textContent = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date()); }, 1000);
   window.setInterval(() => { if (state.socket?.readyState === WebSocket.OPEN) state.socket.send("ping"); }, 20000);
   window.setInterval(loadLLMReports, 60000);
-  window.addEventListener("resize", () => { drawTraffic(); drawTopology(performance.now()); });
+  window.addEventListener("resize", drawTraffic);
 
   loadInitial();
   loadLLMReports();
   connect();
-  requestAnimationFrame(animate);
 })();

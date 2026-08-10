@@ -178,6 +178,9 @@ class MonitorService:
                     item,
                 )
         agents = await self.agent_nodes()
+        exporter_nodes = await self.exporter_nodes()
+        exporters = dict(self.exporters_latest)
+        exporters["nodes"] = exporter_nodes
         self.latest = {
             "type": "snapshot",
             "generated_at": time.time(),
@@ -204,7 +207,7 @@ class MonitorService:
             "devices": current_devices,
             "connectivity": self.connectivity_latest,
             "snmp": self.snmp_latest,
-            "exporters": self.exporters_latest,
+            "exporters": exporters,
             "agents": {
                 "configured": bool(self.settings.agent_token),
                 "online": sum(agent["status"] == "online" for agent in agents),
@@ -228,7 +231,9 @@ class MonitorService:
             "total": len(agents),
             "items": agents,
         }
-        snapshot["exporters"] = self.exporters_latest
+        exporters = dict(self.exporters_latest)
+        exporters["nodes"] = await self.exporter_nodes()
+        snapshot["exporters"] = exporters
         snapshot["events"] = await self.database.events(12)
         return snapshot
 

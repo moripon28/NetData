@@ -27,6 +27,16 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert index.status_code == 200
         assert "NETPULSE" in index.text
         assert "EASY SETUP" in index.text
+        assert 'src="/static/topology3d.js"' in index.text
+        assert 'data-font-size="small"' in index.text
+        assert 'data-font-size="medium"' in index.text
+        assert 'data-font-size="large"' in index.text
+        assert "netpulse.fontSize" in index.text
+        assert 'id="topologyNodeMetrics"' in index.text
+
+        topology_script = client.get("/static/topology3d.js")
+        assert topology_script.status_code == 200
+        assert "NetPulseTopology3D" in topology_script.text
 
         metrics = client.get("/metrics")
         assert metrics.status_code == 200
@@ -106,6 +116,8 @@ def test_signed_agent_heartbeat(tmp_path):
         agents = client.get("/api/v1/agents").json()
         assert agents["online"] == 1
         assert agents["items"][0]["hostname"] == "workstation"
+        snapshot = client.get("/api/v1/snapshot").json()
+        assert snapshot["agents"]["items"][0]["cpu_percent"] == 12.5
 
 
 def test_agent_rejects_bad_signature(tmp_path):
@@ -159,6 +171,8 @@ def test_prometheus_exporter_nodes_are_separate_from_signed_agents(tmp_path):
         assert exporters["status"] == "ok"
         assert exporters["online"] == 1
         assert exporters["nodes"][0]["hostname"] == "nas"
+        snapshot = client.get("/api/v1/snapshot").json()
+        assert snapshot["exporters"]["nodes"][0]["cpu_percent"] == 10.0
         assert client.get("/api/v1/agents").json()["total"] == 0
         metrics = client.get("/metrics").text
         assert 'netpulse_host_up{node_id="exporter-test",hostname="nas",source="prometheus",os="Linux"} 1' in metrics
