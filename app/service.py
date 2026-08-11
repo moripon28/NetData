@@ -457,7 +457,9 @@ class MonitorService:
 
     def _is_monitored_ip(self, address: str) -> bool:
         if self._network is None:
-            return True
+            # サブネット未検出時は明示的に監視対象ホストのみ許可
+            monitored = {self.gateway} | set(self.settings.monitored_hosts)
+            return address in monitored
         try:
             return ipaddress.ip_address(address) in self._network
         except ValueError:

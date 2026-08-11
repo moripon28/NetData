@@ -87,7 +87,7 @@ class AnomalyDetector:
         now = time.time()
         new_events = []
         for anomaly in anomalies:
-            key = anomaly["metric"]
+            key = f"{anomaly['metric']}:{anomaly['direction']}"
             if now - self._event_cooldowns.get(key, 0) >= 900:
                 self._event_cooldowns[key] = now
                 new_events.append(anomaly)

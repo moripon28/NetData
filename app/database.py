@@ -187,44 +187,47 @@ class Database:
 
     async def upsert_device(self, device: dict[str, Any]) -> tuple[bool, str | None]:
         now = float(device.get("last_seen", time.time()))
-        cursor = await self._db().execute("SELECT status FROM devices WHERE ip = ?", (device["ip"],))
-        previous = await cursor.fetchone()
-        is_new = previous is None
-        previous_status = previous["status"] if previous else None
-        await self._db().execute(
-            """
-            INSERT INTO devices (ip, mac, hostname, vendor, device_type, status, latency_ms, first_seen, last_seen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(ip) DO UPDATE SET
-                mac = COALESCE(excluded.mac, devices.mac),
-                hostname = COALESCE(excluded.hostname, devices.hostname),
-                vendor = COALESCE(excluded.vendor, devices.vendor),
-                status = excluded.status,
-                latency_ms = excluded.latency_ms,
-                last_seen = CASE WHEN excluded.status = 'online' THEN excluded.last_seen ELSE devices.last_seen END
-            """,
-            (
-                device["ip"], device.get("mac"), device.get("hostname"), device.get("vendor"),
-                device.get("device_type", "unknown"), device.get("status", "online"),
-                device.get("latency_ms"), now, now,
-            ),
-        )
-        await self._db().commit()
-        return is_new, previous_status
-
-    async def mark_stale_devices(self, older_than: float) -> list[dict[str, Any]]:
-        cursor = await self._db().execute(
-            "SELECT ip, display_name, hostname FROM devices WHERE status = 'online' AND last_seen < ?",
-            (older_than,),
-        )
-        stale = [dict(row) for row in await cursor.fetchall()]
-        if stale:
+        async with self._lock:
+            cursor = await self._db().execute("SELECT status FROM devices WHERE ip = ?", (device["ip"],))
+            previous = await cursor.fetchone()
+            is_new = previous is None
+            previous_status = previous["status"] if previous else None
             await self._db().execute(
-                "UPDATE devices SET status = 'offline', latency_ms = NULL WHERE status = 'online' AND last_seen < ?",
-                (older_than,),
+                """
+                INSERT INTO devices (ip, mac, hostname, vendor, device_type, status, latency_ms, first_seen, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ip) DO UPDATE SET
+                    mac = COALESCE(excluded.mac, devices.mac),
+                    hostname = COALESCE(excluded.hostname, devices.hostname),
+                    vendor = COALESCE(excluded.vendor, devices.vendor),
+                    device_type = COALESCE(excluded.device_type, devices.device_type),
+                    status = excluded.status,
+                    latency_ms = CASE WHEN excluded.status = 'online' THEN excluded.latency_ms ELSE devices.latency_ms END,
+                    last_seen = CASE WHEN excluded.status = 'online' THEN excluded.last_seen ELSE devices.last_seen END
+                """,
+                (
+                    device["ip"], device.get("mac"), device.get("hostname"), device.get("vendor"),
+                    device.get("device_type", "unknown"), device.get("status", "online"),
+                    device.get("latency_ms"), now, now,
+                ),
             )
             await self._db().commit()
-        return stale
+            return is_new, previous_status
+
+    async def mark_stale_devices(self, older_than: float) -> list[dict[str, Any]]:
+        async with self._lock:
+            cursor = await self._db().execute(
+                "SELECT ip, display_name, hostname FROM devices WHERE status = 'online' AND last_seen < ?",
+                (older_than,),
+            )
+            stale = [dict(row) for row in await cursor.fetchall()]
+            if stale:
+                await self._db().execute(
+                    "UPDATE devices SET status = 'offline', latency_ms = NULL WHERE status = 'online' AND last_seen < ?",
+                    (older_than,),
+                )
+                await self._db().commit()
+            return stale
 
     async def devices(self) -> list[dict[str, Any]]:
         cursor = await self._db().execute(
@@ -245,23 +248,25 @@ class Database:
         updates = {key: value for key, value in values.items() if key in allowed}
         if not updates:
             return None
-        columns = ", ".join(f"{key} = ?" for key in updates)
-        params = [int(value) if key == "is_trusted" else value for key, value in updates.items()]
-        params.append(ip)
-        await self._db().execute(f"UPDATE devices SET {columns} WHERE ip = ?", params)
-        await self._db().commit()
-        cursor = await self._db().execute("SELECT * FROM devices WHERE ip = ?", (ip,))
-        row = await cursor.fetchone()
-        return dict(row) if row else None
+        async with self._lock:
+            columns = ", ".join(f"{key} = ?" for key in updates)
+            params = [int(value) if key == "is_trusted" else value for key, value in updates.items()]
+            params.append(ip)
+            await self._db().execute(f"UPDATE devices SET {columns} WHERE ip = ?", params)
+            await self._db().commit()
+            cursor = await self._db().execute("SELECT * FROM devices WHERE ip = ?", (ip,))
+            row = await cursor.fetchone()
+            return dict(row) if row else None
 
     async def add_event(
         self, severity: str, category: str, title: str, detail: str, metadata: dict[str, Any] | None = None
     ) -> None:
-        await self._db().execute(
-            "INSERT INTO events (ts, severity, category, title, detail, metadata) VALUES (?, ?, ?, ?, ?, ?)",
-            (time.time(), severity, category, title, detail, json.dumps(metadata or {}, ensure_ascii=False)),
-        )
-        await self._db().commit()
+        async with self._lock:
+            await self._db().execute(
+                "INSERT INTO events (ts, severity, category, title, detail, metadata) VALUES (?, ?, ?, ?, ?, ?)",
+                (time.time(), severity, category, title, detail, json.dumps(metadata or {}, ensure_ascii=False)),
+            )
+            await self._db().commit()
 
     async def events(self, limit: int = 50) -> list[dict[str, Any]]:
         cursor = await self._db().execute(
@@ -466,21 +471,22 @@ class Database:
         return {row["metric"]: int(row["sample_count"]) for row in await cursor.fetchall()}
 
     async def ensure_llm_settings(self, defaults: dict[str, Any]) -> None:
-        await self._db().execute(
-            """
-            INSERT OR IGNORE INTO llm_settings (
-                id, enabled, base_url, model, system_prompt, interval_minutes, lookback_minutes,
-                api_key_encrypted, updated_at
-            ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                int(bool(defaults.get("enabled"))), defaults.get("base_url", ""), defaults.get("model", ""),
-                defaults.get("system_prompt", ""),
-                int(defaults.get("interval_minutes", 60)), int(defaults.get("lookback_minutes", 60)),
-                defaults.get("api_key_encrypted", ""), time.time(),
-            ),
-        )
-        await self._db().commit()
+        async with self._lock:
+            await self._db().execute(
+                """
+                INSERT OR IGNORE INTO llm_settings (
+                    id, enabled, base_url, model, system_prompt, interval_minutes, lookback_minutes,
+                    api_key_encrypted, updated_at
+                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(bool(defaults.get("enabled"))), defaults.get("base_url", ""), defaults.get("model", ""),
+                    defaults.get("system_prompt", ""),
+                    int(defaults.get("interval_minutes", 60)), int(defaults.get("lookback_minutes", 60)),
+                    defaults.get("api_key_encrypted", ""), time.time(),
+                ),
+            )
+            await self._db().commit()
 
     async def llm_settings(self) -> dict[str, Any]:
         cursor = await self._db().execute("SELECT * FROM llm_settings WHERE id = 1")
@@ -518,21 +524,22 @@ class Database:
         error: str = "",
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        cursor = await self._db().execute(
-            """
-            INSERT INTO llm_reports (
-                created_at, period_start, period_end, model, status, content, error, context
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                time.time(), period_start, period_end, model, status, content, error,
-                json.dumps(context or {}, ensure_ascii=False),
-            ),
-        )
-        await self._db().commit()
-        report_id = cursor.lastrowid
-        row_cursor = await self._db().execute("SELECT * FROM llm_reports WHERE id = ?", (report_id,))
-        return self._decode_llm_report(dict(await row_cursor.fetchone()))
+        async with self._lock:
+            cursor = await self._db().execute(
+                """
+                INSERT INTO llm_reports (
+                    created_at, period_start, period_end, model, status, content, error, context
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    time.time(), period_start, period_end, model, status, content, error,
+                    json.dumps(context or {}, ensure_ascii=False),
+                ),
+            )
+            await self._db().commit()
+            report_id = cursor.lastrowid
+            row_cursor = await self._db().execute("SELECT * FROM llm_reports WHERE id = ?", (report_id,))
+            return self._decode_llm_report(dict(await row_cursor.fetchone()))
 
     async def llm_reports(self, limit: int = 10) -> list[dict[str, Any]]:
         cursor = await self._db().execute(
@@ -554,10 +561,11 @@ class Database:
         return row
 
     async def cleanup(self, retention_days: int) -> None:
-        cutoff = time.time() - retention_days * 86400
-        await self._db().execute("DELETE FROM samples WHERE ts < ?", (cutoff,))
-        await self._db().execute("DELETE FROM events WHERE ts < ?", (cutoff,))
-        await self._db().execute("DELETE FROM connectivity_checks WHERE ts < ?", (cutoff,))
-        await self._db().execute("DELETE FROM snmp_samples WHERE ts < ?", (cutoff,))
-        await self._db().execute("DELETE FROM llm_reports WHERE created_at < ?", (cutoff,))
-        await self._db().commit()
+        async with self._lock:
+            cutoff = time.time() - retention_days * 86400
+            await self._db().execute("DELETE FROM samples WHERE ts < ?", (cutoff,))
+            await self._db().execute("DELETE FROM events WHERE ts < ?", (cutoff,))
+            await self._db().execute("DELETE FROM connectivity_checks WHERE ts < ?", (cutoff,))
+            await self._db().execute("DELETE FROM snmp_samples WHERE ts < ?", (cutoff,))
+            await self._db().execute("DELETE FROM llm_reports WHERE created_at < ?", (cutoff,))
+            await self._db().commit()

@@ -128,10 +128,11 @@ class DeviceDiscovery:
             network = ipaddress.ip_network(subnet, strict=False)
         except ValueError:
             return []
-        hosts = {str(ip) for ip in network.hosts()}
+        hosts = set(str(ip) for ip in network.hosts())
         hosts.update(additional_hosts)
         if len(hosts) > 1024:
-            return []
+            # 最初の1024ホストのみスキャン
+            hosts = set(list(hosts)[:1024])
 
         def probe(ip: str) -> dict[str, Any] | None:
             latency = self.ping(ip)

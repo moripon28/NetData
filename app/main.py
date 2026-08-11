@@ -230,7 +230,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             timestamp = int(timestamp_text)
         except ValueError as exc:
             raise HTTPException(status_code=401, detail="Invalid agent timestamp") from exc
-        if abs(time.time() - timestamp) > 90:
+        if abs(time.time() - timestamp) > 60:
             raise HTTPException(status_code=401, detail="Expired agent request")
         body = await request.body()
         if len(body) > 65_536:
