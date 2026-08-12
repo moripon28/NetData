@@ -144,6 +144,8 @@ LM Studioを別のWindows/Linux PCで動かす場合は、サーバーをLANか�
 
 設定後は `ANALYZE NOW` で手動報告を確認してから定期分析を有効にしてください。NetPulseは指定期間の監視サンプルを平均・最小・最大へ集約し、到達性、イベント、端末・エージェント状態とともにLLMへ渡します。パケット本文、閲覧URL、保存済みAPIキーはプロンプトに含めません。報告はSQLiteへ保存され、画面の履歴から参照できます。
 
+`星図に引用する報告` では、NETWORK CONSTELLATION右上の薄いLLMテキストフィードへ流す範囲を `直近3回分`、`直近5回分`、`直近10回分`、`直近24時間分` から選べます。古い報告からタイプライター表示し、内容が表示枠を超えると末尾へ自動スクロールします。OSの「視差効果を減らす／アニメーションを減らす」が有効な場合は全文の静止表示になります。
+
 APIキーは通常のLM Studioでは不要です。入力した場合もAPIレスポンスへ値を返さず、`data/.llm-settings.key` のローカル鍵で暗号化してSQLiteへ保存します。Base URLを別の接続先へ変更したときは、意図しない転送を防ぐため保存済みAPIキーを自動的に解除します。バックアップ時は `netpulse.db` と `.llm-settings.key` を一緒に保管し、どちらも公開リポジトリへ入れないでください。LLM設定はSQLiteが実行時の正本となり、画面で保存した変更は次の分析から即時反映されます。
 
 ## SNMPを有効にする
@@ -226,7 +228,7 @@ python -m pytest
 
 Windows PowerShellでは有効化コマンドを `.\.venv\Scripts\Activate.ps1` に読み替えてください。デモ表示は `DEMO_MODE=true` と `DATA_DIR=./data` を設定して `uvicorn app.main:app --reload --port 39080` を実行します。
 
-API仕様は `/docs` で確認できます。主要エンドポイントは `/api/v1/snapshot`、`/api/v1/history`、`/api/v1/traffic`、`/api/v1/connectivity`、`/api/v1/snmp`、`/api/v1/exporters`、`/api/v1/agents`、`/api/v1/events`、`/api/v1/llm/settings`、`/api/v1/llm/models`、`/api/v1/llm/reports`、`/ws/live` です。
+API仕様は `/docs` で確認できます。主要エンドポイントは `/api/v1/snapshot`、`/api/v1/history`、`/api/v1/traffic`、`/api/v1/connectivity`、`/api/v1/snmp`、`/api/v1/exporters`、`/api/v1/agents`、`/api/v1/events`、`/api/v1/llm/settings`、`/api/v1/llm/models`、`/api/v1/llm/reports`、`/api/v1/llm/flavor-reports`、`/ws/live` です。
 
 ## セキュリティ上の注意
 

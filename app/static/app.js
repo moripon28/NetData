@@ -21,6 +21,9 @@
     topologyNodeSubtitle: $("topologyNodeSubtitle"), topologyNodeState: $("topologyNodeState"),
     topologyNodeMetrics: $("topologyNodeMetrics"), topologyNodeDescription: $("topologyNodeDescription"),
     topologyProfileButton: $("topologyProfileButton"),
+    llmFlavorStream: $("llmFlavorStream"), llmFlavorScope: $("llmFlavorScope"),
+    llmFlavorViewport: $("llmFlavorViewport"), llmFlavorContent: $("llmFlavorContent"),
+    llmFlavorCursor: $("llmFlavorCursor"), llmFlavorStatus: $("llmFlavorStatus"),
     dialog: $("deviceDialog"), form: $("deviceForm"), dialogIp: $("dialogIp"), dialogName: $("dialogName"),
     dialogType: $("dialogType"), dialogTrusted: $("dialogTrusted"),
     connectivityStatus: $("connectivityStatus"), lanProbeCount: $("lanProbeCount"), lanLatency: $("lanLatency"),
@@ -43,6 +46,7 @@
     llmSystemPrompt: $("llmSystemPrompt"),
     llmModelOptions: $("llmModelOptions"), llmLoadModels: $("llmLoadModels"),
     llmInterval: $("llmInterval"), llmLookback: $("llmLookback"), llmApiKey: $("llmApiKey"),
+    llmFlavorScopeSelect: $("llmFlavorScopeSelect"),
     llmClearApiKey: $("llmClearApiKey"), llmSettingsStatus: $("llmSettingsStatus"),
   };
 
@@ -51,6 +55,7 @@
     trafficSelection: "all", trafficSources: [], trafficSeries: {}, trafficTabSignature: "", trafficWindowMinutes: 5,
     topologyNodes: [], topologyScene: null, selectedTopologyNode: null,
     socket: null, reconnectTimer: null, reports: [], llmSettings: null,
+    flavorSignature: "", flavorGeneration: 0,
   };
   const fontSizeKey = "netpulse.fontSize";
   const fontSizes = new Set(["small", "medium", "large"]);
@@ -325,6 +330,65 @@
     elements.llmReportContent.textContent = report.status === "completed" ? report.content : `分析に失敗しました: ${report.error || "原因不明"}`;
   }
 
+  function flavorTranscript(payload) {
+    const reports = [...(payload.items || [])].reverse();
+    if (!reports.length) {
+      return ":: NO ARCHIVED LLM TRANSMISSIONS\n:: BUFFER STANDING BY\n:: RUN ANALYSIS TO ESTABLISH SIGNAL";
+    }
+    return reports.map((report, index) => {
+      const sequence = String(index + 1).padStart(2, "0");
+      const stamp = formatDateTime(report.created_at).replace(/\s+/g, " ");
+      return `// TRACE ${sequence} · ${stamp}\n// MODEL ${report.model || "LOCAL"}\n${String(report.content || "").trim()}`;
+    }).join("\n\n▓▒░ LINK CONTINUES ░▒▓\n\n");
+  }
+
+  function renderLLMFlavorStream(payload) {
+    const items = payload.items || [];
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const signature = `${payload.scope}:${reducedMotion}:${items.map((report) => `${report.id}:${report.content?.length || 0}`).join(",")}`;
+    elements.llmFlavorScope.textContent = String(payload.label || "直近3回分").toUpperCase();
+    elements.llmFlavorStatus.textContent = items.length ? `${items.length} TRANSMISSIONS` : "BUFFER STANDING BY";
+    if (signature === state.flavorSignature) return;
+    state.flavorSignature = signature;
+    state.flavorGeneration += 1;
+    const generation = state.flavorGeneration;
+    const transcript = flavorTranscript(payload);
+    elements.llmFlavorStream.classList.toggle("reduced-motion", reducedMotion);
+    elements.llmFlavorCursor.hidden = reducedMotion;
+
+    if (reducedMotion) {
+      elements.llmFlavorContent.textContent = transcript;
+      elements.llmFlavorViewport.scrollTop = 0;
+      return;
+    }
+
+    const characters = Array.from(transcript);
+    const textNode = document.createTextNode("");
+    elements.llmFlavorContent.replaceChildren(textNode);
+    elements.llmFlavorViewport.scrollTop = 0;
+    let position = 0;
+    const typeNext = () => {
+      if (generation !== state.flavorGeneration) return;
+      if (position >= characters.length) {
+        window.setTimeout(() => {
+          if (generation !== state.flavorGeneration) return;
+          textNode.data = "";
+          position = 0;
+          elements.llmFlavorViewport.scrollTop = 0;
+          window.setTimeout(typeNext, 500);
+        }, 4500);
+        return;
+      }
+      const character = characters[position];
+      textNode.appendData(character);
+      position += 1;
+      elements.llmFlavorViewport.scrollTop = elements.llmFlavorViewport.scrollHeight;
+      const pause = character === "\n" ? 85 : /[。！？]/.test(character) ? 120 : 16;
+      window.setTimeout(typeNext, pause);
+    };
+    window.setTimeout(typeNext, 350);
+  }
+
   async function loadLLMSettings() {
     const response = await fetch("/api/v1/llm/settings");
     if (!response.ok) throw new Error(await apiError(response));
@@ -334,14 +398,19 @@
 
   async function loadLLMReports() {
     try {
-      const [settings, response] = await Promise.all([loadLLMSettings(), fetch("/api/v1/llm/reports?limit=20")]);
+      const [settings, response, flavorResponse] = await Promise.all([
+        loadLLMSettings(), fetch("/api/v1/llm/reports?limit=20"), fetch("/api/v1/llm/flavor-reports"),
+      ]);
       if (!response.ok) throw new Error(await apiError(response));
+      if (!flavorResponse.ok) throw new Error(await apiError(flavorResponse));
       const payload = await response.json();
+      const flavorPayload = await flavorResponse.json();
       state.reports = payload.items || [];
       elements.llmRunButton.disabled = Boolean(payload.running);
       elements.llmRunButton.textContent = payload.running ? "ANALYZING…" : "ANALYZE NOW";
       elements.llmReportHistory.innerHTML = '<option value="">LATEST REPORT</option>' + state.reports.map((report) => `<option value="${report.id}">${escapeHtml(formatDateTime(report.created_at))} · ${escapeHtml(report.status.toUpperCase())}</option>`).join("");
       renderLLMReport(state.reports[0]);
+      renderLLMFlavorStream(flavorPayload);
       if (!state.reports.length && settings.enabled) setMiniStatus(elements.llmReportStatus, "waiting");
     } catch (error) {
       console.warn("LLM report load failed", error);
@@ -369,6 +438,7 @@
       elements.llmSystemPrompt.value = settings.system_prompt || "";
       ensureSelectValue(elements.llmInterval, settings.interval_minutes);
       ensureSelectValue(elements.llmLookback, settings.lookback_minutes);
+      elements.llmFlavorScopeSelect.value = settings.flavor_scope || "last_3";
       elements.llmApiKey.value = "";
       elements.llmClearApiKey.checked = false;
       elements.llmSettingsStatus.textContent = settings.api_key_configured ? "APIキーは暗号化して設定済みです。変更する場合だけ入力してください。" : "APIキーは未設定です。";
@@ -748,6 +818,7 @@
       system_prompt: elements.llmSystemPrompt.value.trim(),
       interval_minutes: Number(elements.llmInterval.value),
       lookback_minutes: Number(elements.llmLookback.value),
+      flavor_scope: elements.llmFlavorScopeSelect.value,
     };
     if (elements.llmClearApiKey.checked) payload.api_key = "";
     else if (elements.llmApiKey.value) payload.api_key = elements.llmApiKey.value;
@@ -756,7 +827,7 @@
       const response = await fetch("/api/v1/llm/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
       if (!response.ok) throw new Error(await apiError(response));
       state.llmSettings = await response.json();
-      elements.llmSettingsStatus.textContent = "設定を保存しました。次の分析から反映されます。";
+      elements.llmSettingsStatus.textContent = "設定を保存しました。引用範囲はすぐ表示に反映されます。";
       window.setTimeout(() => elements.llmSettingsDialog.close(), 650);
       await loadLLMReports();
     } catch (error) { elements.llmSettingsStatus.textContent = `保存できません: ${error.message}`; }

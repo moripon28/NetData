@@ -30,7 +30,9 @@ async def test_database_adds_system_prompt_to_existing_llm_settings(tmp_path):
     database = Database(path)
     await database.connect()
     try:
-        assert (await database.llm_settings())["system_prompt"] == ""
+        migrated = await database.llm_settings()
+        assert migrated["system_prompt"] == ""
+        assert migrated["flavor_scope"] == "last_3"
     finally:
         await database.close()
 
@@ -101,12 +103,16 @@ async def test_database_round_trip(tmp_path):
                 "enabled": False, "base_url": "http://127.0.0.1:1234/v1", "model": "test-model",
                 "system_prompt": "日本語で報告してください。",
                 "interval_minutes": 60, "lookback_minutes": 60, "api_key_encrypted": "ciphertext",
+                "flavor_scope": "last_3",
             }
         )
-        llm_settings = await database.update_llm_settings({"enabled": True, "lookback_minutes": 360})
+        llm_settings = await database.update_llm_settings(
+            {"enabled": True, "lookback_minutes": 360, "flavor_scope": "last_5"}
+        )
         assert llm_settings["enabled"] is True
         assert llm_settings["api_key_encrypted"] == "ciphertext"
         assert llm_settings["system_prompt"] == "日本語で報告してください。"
+        assert llm_settings["flavor_scope"] == "last_5"
         statistics = await database.sample_statistics(60)
         assert statistics["sample_count"] == 1
         assert statistics["rx_bps_avg"] == 1024
@@ -121,5 +127,17 @@ async def test_database_round_trip(tmp_path):
         )
         assert report["context"]["sample_count"] == 1
         assert (await database.llm_reports(1))[0]["content"] == "ネットワークは正常です。"
+        for index in range(4):
+            await database.save_llm_report(
+                period_start=now - 3600,
+                period_end=now,
+                model="test-model",
+                status="completed",
+                content=f"追加レポート {index}",
+            )
+        flavor_reports = await database.llm_flavor_reports("last_3")
+        assert [item["content"] for item in flavor_reports] == [
+            "追加レポート 3", "追加レポート 2", "追加レポート 1",
+        ]
     finally:
         await database.close()

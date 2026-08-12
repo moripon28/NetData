@@ -5,7 +5,7 @@ import hmac
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -58,6 +58,7 @@ class LLMSettingsUpdate(BaseModel):
     system_prompt: str | None = Field(default=None, min_length=1, max_length=8_000)
     interval_minutes: int | None = Field(default=None, ge=15, le=10_080)
     lookback_minutes: int | None = Field(default=None, ge=15, le=43_200)
+    flavor_scope: Literal["last_3", "last_5", "last_10", "hours_24"] | None = None
     api_key: str | None = Field(default=None, max_length=2_000)
 
 
@@ -193,6 +194,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def llm_reports(limit: int = Query(10, ge=1, le=100)) -> dict[str, Any]:
         items = await reporter.reports(limit)
         return {"total": len(items), "items": items, "running": reporter._run_lock.locked()}
+
+    @app.get("/api/v1/llm/flavor-reports")
+    async def llm_flavor_reports() -> dict[str, Any]:
+        return await reporter.flavor_reports()
 
     @app.post("/api/v1/llm/reports/run")
     async def run_llm_report() -> dict[str, Any]:

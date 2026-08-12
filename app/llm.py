@@ -17,6 +17,12 @@ from app.database import Database
 
 
 SnapshotProvider = Callable[[], Awaitable[dict[str, Any]]]
+LLM_FLAVOR_SCOPES = {
+    "last_3": "直近3回分",
+    "last_5": "直近5回分",
+    "last_10": "直近10回分",
+    "hours_24": "直近24時間分",
+}
 
 
 class LLMConnectionError(RuntimeError):
@@ -214,6 +220,7 @@ class LLMReporter:
                 "system_prompt": self.settings.llm_system_prompt,
                 "interval_minutes": self.settings.llm_report_interval,
                 "lookback_minutes": self.settings.llm_report_lookback,
+                "flavor_scope": "last_3",
                 "api_key_encrypted": self.cipher.encrypt(self.settings.llm_api_key),
             }
         )
@@ -244,6 +251,7 @@ class LLMReporter:
             "system_prompt": values["system_prompt"],
             "interval_minutes": values["interval_minutes"],
             "lookback_minutes": values["lookback_minutes"],
+            "flavor_scope": values["flavor_scope"],
             "api_key_configured": bool(values["api_key_encrypted"]),
             "updated_at": values["updated_at"],
             "running": self._run_lock.locked(),
@@ -264,6 +272,8 @@ class LLMReporter:
             normalized["system_prompt"] = str(normalized["system_prompt"]).strip()
             if not normalized["system_prompt"]:
                 raise ValueError("システムプロンプトを入力してください。")
+        if "flavor_scope" in normalized and normalized["flavor_scope"] not in LLM_FLAVOR_SCOPES:
+            raise ValueError("表示するLLM報告の範囲が不正です。")
         if "api_key" in normalized:
             normalized["api_key_encrypted"] = self.cipher.encrypt(str(normalized.pop("api_key")).strip())
         await self.database.update_llm_settings(normalized)
@@ -282,6 +292,14 @@ class LLMReporter:
 
     async def reports(self, limit: int = 10) -> list[dict[str, Any]]:
         return await self.database.llm_reports(limit)
+
+    async def flavor_reports(self) -> dict[str, Any]:
+        values = await self.database.llm_settings()
+        scope = values.get("flavor_scope", "last_3")
+        if scope not in LLM_FLAVOR_SCOPES:
+            scope = "last_3"
+        items = await self.database.llm_flavor_reports(scope)
+        return {"scope": scope, "label": LLM_FLAVOR_SCOPES[scope], "items": items}
 
     async def run_report(self, trigger: str = "manual") -> dict[str, Any]:
         if self._run_lock.locked():

@@ -127,6 +127,7 @@ class Database:
                 system_prompt TEXT NOT NULL DEFAULT '',
                 interval_minutes INTEGER NOT NULL DEFAULT 60,
                 lookback_minutes INTEGER NOT NULL DEFAULT 60,
+                flavor_scope TEXT NOT NULL DEFAULT 'last_3',
                 api_key_encrypted TEXT NOT NULL DEFAULT '',
                 updated_at REAL NOT NULL
             );
@@ -161,6 +162,10 @@ class Database:
         if "system_prompt" not in llm_columns:
             await self._connection.execute(
                 "ALTER TABLE llm_settings ADD COLUMN system_prompt TEXT NOT NULL DEFAULT ''"
+            )
+        if "flavor_scope" not in llm_columns:
+            await self._connection.execute(
+                "ALTER TABLE llm_settings ADD COLUMN flavor_scope TEXT NOT NULL DEFAULT 'last_3'"
             )
         await self._connection.commit()
 
@@ -527,13 +532,14 @@ class Database:
                 """
                 INSERT OR IGNORE INTO llm_settings (
                     id, enabled, base_url, model, system_prompt, interval_minutes, lookback_minutes,
-                    api_key_encrypted, updated_at
-                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                    flavor_scope, api_key_encrypted, updated_at
+                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     int(bool(defaults.get("enabled"))), defaults.get("base_url", ""), defaults.get("model", ""),
                     defaults.get("system_prompt", ""),
                     int(defaults.get("interval_minutes", 60)), int(defaults.get("lookback_minutes", 60)),
+                    defaults.get("flavor_scope", "last_3"),
                     defaults.get("api_key_encrypted", ""), time.time(),
                 ),
             )
@@ -551,7 +557,7 @@ class Database:
     async def update_llm_settings(self, values: dict[str, Any]) -> dict[str, Any]:
         allowed = {
             "enabled", "base_url", "model", "system_prompt", "interval_minutes", "lookback_minutes",
-            "api_key_encrypted",
+            "flavor_scope", "api_key_encrypted",
         }
         updates = {key: value for key, value in values.items() if key in allowed}
         if not updates:
@@ -594,8 +600,32 @@ class Database:
 
     async def llm_reports(self, limit: int = 10) -> list[dict[str, Any]]:
         cursor = await self._db().execute(
-            "SELECT * FROM llm_reports ORDER BY created_at DESC LIMIT ?", (max(1, min(limit, 100)),)
+            "SELECT * FROM llm_reports ORDER BY created_at DESC, id DESC LIMIT ?", (max(1, min(limit, 100)),)
         )
+        return [self._decode_llm_report(dict(row)) for row in await cursor.fetchall()]
+
+    async def llm_flavor_reports(self, scope: str) -> list[dict[str, Any]]:
+        count_limits = {"last_3": 3, "last_5": 5, "last_10": 10}
+        if scope in count_limits:
+            cursor = await self._db().execute(
+                """
+                SELECT * FROM llm_reports
+                WHERE status = 'completed' AND content != ''
+                ORDER BY created_at DESC, id DESC LIMIT ?
+                """,
+                (count_limits[scope],),
+            )
+        elif scope == "hours_24":
+            cursor = await self._db().execute(
+                """
+                SELECT * FROM llm_reports
+                WHERE status = 'completed' AND content != '' AND created_at >= ?
+                ORDER BY created_at DESC, id DESC
+                """,
+                (time.time() - 86_400,),
+            )
+        else:
+            raise ValueError("Unknown LLM flavor report scope")
         return [self._decode_llm_report(dict(row)) for row in await cursor.fetchall()]
 
     async def last_llm_report_at(self) -> float | None:

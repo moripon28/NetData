@@ -17,7 +17,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=20260813-traffic-stream">
+  <link rel="stylesheet" href="/static/styles.css?v=20260813-llm-echo">
 </head>
 <body>
   <div class="ambient ambient-a" aria-hidden="true"></div>
@@ -65,6 +65,13 @@
             <span>CLIENT RENDERED</span>
             <b id="topologyNodeCount">0 NODES</b>
           </div>
+          <aside class="llm-flavor-stream" id="llmFlavorStream" aria-hidden="true">
+            <header><span>LOCAL LLM // ECHO BUFFER</span><b id="llmFlavorScope">LAST 3 REPORTS</b></header>
+            <div class="llm-flavor-viewport" id="llmFlavorViewport">
+              <pre id="llmFlavorContent">AWAITING ARCHIVED TRANSMISSIONS...</pre><i id="llmFlavorCursor"></i>
+            </div>
+            <div class="llm-flavor-foot"><span id="llmFlavorStatus">BUFFER SYNC</span><b>TYPE FEED · AUTO SCROLL</b></div>
+          </aside>
           <aside class="topology-inspector" id="topologyInspector" aria-live="polite">
             <header>
               <div><small id="topologyNodeRole">OBSERVER NODE</small><strong id="topologyNodeTitle">RP5 MONITOR</strong><span id="topologyNodeSubtitle">テレメトリを取得しています</span></div>
@@ -270,16 +277,17 @@
         <label class="field-wide">システムプロンプト<textarea id="llmSystemPrompt" required maxlength="8000" rows="7" placeholder="例: 必ず日本語で報告してください。"></textarea></label>
         <label>報告間隔<select id="llmInterval"><option value="15">15分</option><option value="30">30分</option><option value="60">1時間</option><option value="180">3時間</option><option value="360">6時間</option><option value="720">12時間</option><option value="1440">24時間</option></select></label>
         <label>分析対象期間<select id="llmLookback"><option value="15">直近15分</option><option value="30">直近30分</option><option value="60">直近1時間</option><option value="360">直近6時間</option><option value="1440">直近24時間</option><option value="10080">直近7日</option></select></label>
+        <label class="field-wide">星図に引用する報告<select id="llmFlavorScopeSelect"><option value="last_3">直近3回分</option><option value="last_5">直近5回分</option><option value="last_10">直近10回分</option><option value="hours_24">直近24時間分</option></select></label>
         <label class="field-wide">APIキー（必要な場合のみ）<input id="llmApiKey" type="password" maxlength="2000" autocomplete="new-password" placeholder="保存済みの値は表示しません"></label>
       </div>
       <label class="trust-toggle clear-secret"><input id="llmClearApiKey" type="checkbox"><span></span>保存済みAPIキーを削除する</label>
-      <p class="form-hint">システムプロンプトには既定で日本語報告を指定しています。LM Studioは通常APIキー不要です。設定は保存後すぐ次の分析から反映されます。</p>
+      <p class="form-hint">星図への引用範囲は保存後すぐ表示に反映されます。システムプロンプトには既定で日本語報告を指定しています。LM Studioは通常APIキー不要です。</p>
       <p class="form-status" id="llmSettingsStatus" role="status"></p>
       <div class="dialog-actions"><button id="llmSettingsCancel" type="button" class="cancel">CANCEL</button><button type="submit" class="save">SAVE SETTINGS</button></div>
     </form>
   </dialog>
 
   <script src="/static/topology3d.js" defer></script>
-  <script src="/static/app.js?v=20260813-traffic-stream" defer></script>
+  <script src="/static/app.js?v=20260813-llm-echo" defer></script>
 </body>
 </html>

@@ -35,8 +35,10 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'id="topologyNodeMetrics"' in index.text
         assert 'id="trafficTabs"' in index.text
         assert 'role="tablist"' in index.text
-        assert '/static/styles.css?v=20260813-traffic-stream' in index.text
-        assert '/static/app.js?v=20260813-traffic-stream' in index.text
+        assert 'id="llmFlavorStream"' in index.text
+        assert 'id="llmFlavorScope"' in index.text
+        assert '/static/styles.css?v=20260813-llm-echo' in index.text
+        assert '/static/app.js?v=20260813-llm-echo' in index.text
 
         topology_script = client.get("/static/topology3d.js")
         assert topology_script.status_code == 200
@@ -313,6 +315,7 @@ def test_llm_settings_model_discovery_and_manual_report(tmp_path):
                 "system_prompt": "必ず日本語で報告してください。",
                 "interval_minutes": 60,
                 "lookback_minutes": 60,
+                "flavor_scope": "last_3",
                 "api_key": "secret-value",
             },
         )
@@ -323,6 +326,7 @@ def test_llm_settings_model_discovery_and_manual_report(tmp_path):
         public_settings = client.get("/api/v1/llm/settings").json()
         assert public_settings["model"] == "chat-model"
         assert public_settings["system_prompt"] == "必ず日本語で報告してください。"
+        assert public_settings["flavor_scope"] == "last_3"
         assert "secret-value" not in json.dumps(public_settings)
 
         models = client.post(
@@ -337,6 +341,18 @@ def test_llm_settings_model_discovery_and_manual_report(tmp_path):
         reports = client.get("/api/v1/llm/reports").json()
         assert reports["items"][0]["content"].startswith("総評")
         assert reports["items"][0]["context"]["sample_count"] == 1
+        flavor = client.get("/api/v1/llm/flavor-reports")
+        assert flavor.status_code == 200
+        assert flavor.json()["scope"] == "last_3"
+        assert flavor.json()["label"] == "直近3回分"
+        assert flavor.json()["items"][0]["content"].startswith("総評")
+        changed_scope = client.put("/api/v1/llm/settings", json={"flavor_scope": "hours_24"})
+        assert changed_scope.status_code == 200
+        assert changed_scope.json()["flavor_scope"] == "hours_24"
+        flavor_24h = client.get("/api/v1/llm/flavor-reports").json()
+        assert flavor_24h["scope"] == "hours_24"
+        assert flavor_24h["label"] == "直近24時間分"
+        assert client.put("/api/v1/llm/settings", json={"flavor_scope": "invalid"}).status_code == 422
 
         async def fake_other_models(base_url, api_key=""):
             assert base_url == "http://192.168.10.99:1234/v1"
