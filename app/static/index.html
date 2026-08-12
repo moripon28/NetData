@@ -17,7 +17,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/styles.css?v=20260813-traffic-stream">
 </head>
 <body>
   <div class="ambient ambient-a" aria-hidden="true"></div>
@@ -113,8 +113,13 @@
               <span class="upload"><i>↑</i><b id="uploadRate">0 bps</b></span>
             </div>
           </header>
+          <div class="traffic-source-strip">
+            <div class="traffic-tabs" id="trafficTabs" role="tablist" aria-label="トラフィックを表示する端末"></div>
+            <span class="traffic-source-count" id="trafficSourceCount">0 / 0 LIVE</span>
+          </div>
+          <div class="traffic-scope"><b id="trafficScope">すべての端末の合計</b><span>取得できている端末を集計</span></div>
           <div class="chart-wrap"><canvas id="trafficCanvas" aria-label="直近の受信・送信速度グラフ"></canvas></div>
-          <div class="chart-axis"><span>60 SEC AGO</span><span>NOW</span></div>
+          <div class="chart-axis"><span id="trafficAxisStart">2 MIN AGO</span><span>NOW</span></div>
         </article>
 
         <article class="panel system-panel">
@@ -275,6 +280,6 @@
   </dialog>
 
   <script src="/static/topology3d.js" defer></script>
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js?v=20260813-traffic-stream" defer></script>
 </body>
 </html>

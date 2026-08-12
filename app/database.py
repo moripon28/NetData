@@ -98,6 +98,17 @@ class Database:
                 metadata TEXT NOT NULL DEFAULT '{}'
             );
 
+            CREATE TABLE IF NOT EXISTS host_traffic_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts REAL NOT NULL,
+                node_id TEXT NOT NULL,
+                hostname TEXT NOT NULL,
+                source_ip TEXT NOT NULL DEFAULT '',
+                source_type TEXT NOT NULL,
+                rx_bps REAL NOT NULL DEFAULT 0,
+                tx_bps REAL NOT NULL DEFAULT 0
+            );
+
             CREATE TABLE IF NOT EXISTS metric_baselines (
                 metric TEXT NOT NULL,
                 hour_bucket INTEGER NOT NULL,
@@ -138,6 +149,8 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_connectivity_ts ON connectivity_checks(ts DESC);
             CREATE INDEX IF NOT EXISTS idx_snmp_ts ON snmp_samples(ts DESC);
             CREATE INDEX IF NOT EXISTS idx_agents_seen ON agent_nodes(last_seen DESC);
+            CREATE INDEX IF NOT EXISTS idx_host_traffic_node_ts ON host_traffic_samples(node_id, ts DESC);
+            CREATE INDEX IF NOT EXISTS idx_host_traffic_ts ON host_traffic_samples(ts DESC);
             CREATE INDEX IF NOT EXISTS idx_llm_reports_created ON llm_reports(created_at DESC);
             """
         )
@@ -393,6 +406,8 @@ class Database:
 
     async def upsert_agent(self, payload: dict[str, Any], source_ip: str) -> None:
         now = time.time()
+        metadata = payload.get("metadata", {})
+        source_type = "prometheus" if metadata.get("collection_method") == "prometheus" else "agent"
         async with self._lock:
             await self._db().execute(
                 """
@@ -414,10 +429,46 @@ class Database:
                     source_ip, payload.get("agent_version", ""), payload["cpu_percent"],
                     payload["memory_percent"], payload["disk_percent"], payload.get("temperature_c"),
                     payload["uptime_seconds"], payload.get("rx_bps", 0), payload.get("tx_bps", 0), now,
-                    json.dumps(payload.get("metadata", {}), ensure_ascii=False),
+                    json.dumps(metadata, ensure_ascii=False),
+                ),
+            )
+            await self._db().execute(
+                """
+                INSERT INTO host_traffic_samples (
+                    ts, node_id, hostname, source_ip, source_type, rx_bps, tx_bps
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    now, payload["node_id"], payload["hostname"], source_ip, source_type,
+                    payload.get("rx_bps", 0), payload.get("tx_bps", 0),
                 ),
             )
             await self._db().commit()
+
+    async def host_traffic_history(
+        self, minutes: int = 60, node_ids: list[str] | None = None, limit: int = 20_000
+    ) -> list[dict[str, Any]]:
+        if node_ids is not None and not node_ids:
+            return []
+        since = time.time() - max(1, minutes) * 60
+        params: list[Any] = [since]
+        predicate = "ts >= ?"
+        if node_ids:
+            placeholders = ", ".join("?" for _ in node_ids)
+            predicate += f" AND node_id IN ({placeholders})"
+            params.extend(node_ids)
+        params.append(max(1, min(limit, 50_000)))
+        cursor = await self._db().execute(
+            f"""
+            SELECT ts, node_id, hostname, source_ip, source_type, rx_bps, tx_bps
+            FROM host_traffic_samples
+            WHERE {predicate}
+            ORDER BY ts DESC
+            LIMIT ?
+            """,
+            params,
+        )
+        return [dict(row) for row in reversed(await cursor.fetchall())]
 
     async def agents(self, offline_after: int = 60) -> list[dict[str, Any]]:
         cursor = await self._db().execute("SELECT * FROM agent_nodes ORDER BY last_seen DESC")
@@ -567,5 +618,6 @@ class Database:
             await self._db().execute("DELETE FROM events WHERE ts < ?", (cutoff,))
             await self._db().execute("DELETE FROM connectivity_checks WHERE ts < ?", (cutoff,))
             await self._db().execute("DELETE FROM snmp_samples WHERE ts < ?", (cutoff,))
+            await self._db().execute("DELETE FROM host_traffic_samples WHERE ts < ?", (cutoff,))
             await self._db().execute("DELETE FROM llm_reports WHERE created_at < ?", (cutoff,))
             await self._db().commit()

@@ -8,6 +8,8 @@
     healthMessage: $("healthMessage"), online: $("onlineDevices"), total: $("totalDevices"),
     packetLoss: $("packetLoss"), interface: $("interfaceName"), uptime: $("uptime"),
     down: $("downloadRate"), up: $("uploadRate"), temperature: $("temperature"),
+    trafficTabs: $("trafficTabs"), trafficSourceCount: $("trafficSourceCount"),
+    trafficScope: $("trafficScope"), trafficAxisStart: $("trafficAxisStart"),
     cpu: $("cpuValue"), cpuBar: $("cpuBar"), cpuDetail: $("cpuDetail"),
     memory: $("memoryValue"), memoryBar: $("memoryBar"), memoryDetail: $("memoryDetail"),
     disk: $("diskValue"), diskBar: $("diskBar"), diskDetail: $("diskDetail"),
@@ -46,6 +48,7 @@
 
   const state = {
     snapshot: null, devices: [], rx: [], tx: [], filter: "all", search: "", selectedIp: null,
+    trafficSelection: "all", trafficSources: [], trafficSeries: {}, trafficTabSignature: "", trafficWindowMinutes: 5,
     topologyNodes: [], topologyScene: null, selectedTopologyNode: null,
     socket: null, reconnectTimer: null, reports: [], llmSettings: null,
   };
@@ -123,6 +126,114 @@
     elements.connection.querySelector("b").textContent = mode === "connected" ? "LIVE" : mode === "disconnected" ? "RECONNECTING" : "CONNECTING";
   }
 
+  const trafficKindLabels = { aggregate: "TOTAL", local: "RASPBERRY PI", agent: "AGENT", prometheus: "EXPORTER" };
+
+  function trafficFallback(snapshot) {
+    const network = snapshot.network || {};
+    const local = {
+      id: "local", label: "Raspberry Pi 5", kind: "local",
+      status: network.interface && network.interface !== "detecting" ? "online" : "checking",
+      rx_bps: Number(network.rx_bps) || 0, tx_bps: Number(network.tx_bps) || 0,
+      observed_at: snapshot.generated_at,
+    };
+    return {
+      total: { ...local, id: "all", label: "すべての端末", kind: "aggregate" },
+      sources: [local], source_count: 1, online_source_count: local.status === "online" ? 1 : 0,
+    };
+  }
+
+  function renderTrafficTabs() {
+    const signature = state.trafficSources.map((source) => `${source.id}|${source.label}|${source.kind}|${source.status}`).join(";");
+    if (signature !== state.trafficTabSignature) {
+      const previousScroll = elements.trafficTabs.scrollLeft;
+      const fragment = document.createDocumentFragment();
+      state.trafficSources.forEach((source) => {
+        const button = document.createElement("button");
+        const status = ["online", "offline", "checking"].includes(source.status) ? source.status : "checking";
+        button.type = "button";
+        button.className = `traffic-tab ${source.kind === "aggregate" ? "aggregate " : ""}${status}`;
+        button.dataset.sourceId = source.id;
+        button.setAttribute("role", "tab");
+        button.setAttribute("aria-controls", "trafficCanvas");
+        button.title = `${source.label} · ${trafficKindLabels[source.kind] || source.kind}`;
+        const dot = document.createElement("i");
+        dot.setAttribute("aria-hidden", "true");
+        const label = document.createElement("span");
+        label.textContent = source.kind === "aggregate" ? "ALL" : source.label;
+        button.append(dot, label);
+        fragment.append(button);
+      });
+      elements.trafficTabs.replaceChildren(fragment);
+      elements.trafficTabs.scrollLeft = previousScroll;
+      state.trafficTabSignature = signature;
+    }
+    elements.trafficTabs.querySelectorAll("[role=tab]").forEach((button) => {
+      const selected = button.dataset.sourceId === state.trafficSelection;
+      button.setAttribute("aria-selected", String(selected));
+      button.tabIndex = selected ? 0 : -1;
+    });
+  }
+
+  function syncTrafficView() {
+    let source = state.trafficSources.find((item) => item.id === state.trafficSelection);
+    if (!source) {
+      state.trafficSelection = "all";
+      source = state.trafficSources.find((item) => item.id === "all");
+    }
+    const samples = state.trafficSeries[state.trafficSelection] || [];
+    state.rx = samples.map((sample) => Number(sample.rx_bps) || 0);
+    state.tx = samples.map((sample) => Number(sample.tx_bps) || 0);
+    elements.down.textContent = formatRate(source?.rx_bps);
+    elements.up.textContent = formatRate(source?.tx_bps);
+    const kind = trafficKindLabels[source?.kind] || "TELEMETRY";
+    elements.trafficScope.textContent = source?.kind === "aggregate" ? "すべての計測端末の合計" : `${source?.label || "端末"} · ${kind}`;
+    elements.trafficScope.parentElement.querySelector("span").textContent = source?.kind === "aggregate"
+      ? "取得できている端末を集計"
+      : source?.status === "online" ? "リアルタイム受信中" : source?.status === "offline" ? "オフライン · 履歴を表示" : "取得待ち";
+    elements.traffic.setAttribute("aria-label", `${source?.label || "端末"}の直近の受信・送信速度グラフ`);
+    renderTrafficTabs();
+    drawTraffic();
+  }
+
+  function applyTrafficSnapshot(payload, append = true) {
+    const total = payload?.total;
+    const sources = Array.isArray(payload?.sources) ? payload.sources : [];
+    if (!total) return;
+    state.trafficSources = [total, ...sources];
+    if (!state.trafficSources.some((source) => source.id === state.trafficSelection)) state.trafficSelection = "all";
+    elements.trafficSourceCount.textContent = `${payload.online_source_count || 0} / ${payload.source_count || sources.length} LIVE`;
+    if (append) {
+      const timestamp = Number(total.observed_at) || Date.now() / 1000;
+      state.trafficSources.forEach((source) => {
+        const series = state.trafficSeries[source.id] || (state.trafficSeries[source.id] = []);
+        const point = { ts: timestamp, rx_bps: Number(source.rx_bps) || 0, tx_bps: Number(source.tx_bps) || 0 };
+        if (series.length && Math.abs(Number(series[series.length - 1].ts) - timestamp) < 0.25) series[series.length - 1] = point;
+        else series.push(point);
+        if (series.length > maxPoints) series.splice(0, series.length - maxPoints);
+      });
+    }
+    syncTrafficView();
+  }
+
+  function loadTrafficHistory(payload) {
+    state.trafficWindowMinutes = Number(payload.minutes) || 2;
+    state.trafficSeries = {};
+    Object.entries(payload.series || {}).forEach(([sourceId, samples]) => {
+      state.trafficSeries[sourceId] = Array.isArray(samples) ? samples.slice(-maxPoints) : [];
+    });
+    elements.trafficAxisStart.textContent = state.trafficWindowMinutes === 1 ? "60 SEC AGO" : `${state.trafficWindowMinutes} MIN AGO`;
+    applyTrafficSnapshot(payload, false);
+  }
+
+  function selectTrafficSource(sourceId, focus = false) {
+    if (!state.trafficSources.some((source) => source.id === sourceId)) return;
+    state.trafficSelection = sourceId;
+    syncTrafficView();
+    const selected = [...elements.trafficTabs.querySelectorAll("[role=tab]")].find((button) => button.dataset.sourceId === sourceId);
+    selected?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    if (focus) selected?.focus();
+  }
+
   function applySnapshot(snapshot) {
     state.snapshot = snapshot;
     state.devices = snapshot.devices || [];
@@ -143,16 +254,13 @@
     elements.packetLoss.textContent = `${Number(network.packet_loss_percent || 0).toFixed(1)}%`;
     elements.interface.textContent = String(network.interface || "—").toUpperCase();
     elements.uptime.textContent = formatDuration(system.uptime_seconds);
-    elements.down.textContent = formatRate(network.rx_bps);
-    elements.up.textContent = formatRate(network.tx_bps);
     elements.temperature.textContent = system.temperature_c == null ? "N/A" : `${Number(system.temperature_c).toFixed(1)}°C`;
 
     updateMetric("cpu", system.cpu_percent, `LOAD ${Number(system.load_1m || 0).toFixed(2)} / ${Number(system.load_5m || 0).toFixed(2)}`);
     updateMetric("memory", system.memory_percent, `${formatBytes(system.memory_used)} / ${formatBytes(system.memory_total)}`);
     updateMetric("disk", system.disk_percent, `${formatBytes(system.disk_used)} / ${formatBytes(system.disk_total)}`);
 
-    pushPoint(network.rx_bps, network.tx_bps);
-    drawTraffic();
+    applyTrafficSnapshot(snapshot.traffic || trafficFallback(snapshot));
     renderDevices();
     renderEvents(snapshot.events || []);
     renderHorizon(snapshot);
@@ -165,13 +273,6 @@
     elements[`${name}Bar`].style.width = `${percent}%`;
     elements[`${name}Bar`].style.background = percent >= 90 ? "#ff667a" : percent >= 75 ? "#ffb65c" : "linear-gradient(90deg, #4ce7db, #9cffce)";
     elements[`${name}Detail`].textContent = detail;
-  }
-
-  function pushPoint(rx, tx) {
-    state.rx.push(Number(rx) || 0);
-    state.tx.push(Number(tx) || 0);
-    if (state.rx.length > maxPoints) state.rx.shift();
-    if (state.tx.length > maxPoints) state.tx.shift();
   }
 
   function renderDevices() {
@@ -523,11 +624,9 @@
 
   async function loadInitial() {
     try {
-      const [snapshotResponse, historyResponse] = await Promise.all([fetch("/api/v1/snapshot"), fetch("/api/v1/history?minutes=5")]);
-      if (!snapshotResponse.ok || !historyResponse.ok) throw new Error("API unavailable");
-      const history = await historyResponse.json();
-      state.rx = (history.samples || []).slice(-maxPoints).map((sample) => Number(sample.rx_bps) || 0);
-      state.tx = (history.samples || []).slice(-maxPoints).map((sample) => Number(sample.tx_bps) || 0);
+      const [snapshotResponse, trafficResponse] = await Promise.all([fetch("/api/v1/snapshot"), fetch("/api/v1/traffic?minutes=2&points=60")]);
+      if (!snapshotResponse.ok || !trafficResponse.ok) throw new Error("API unavailable");
+      loadTrafficHistory(await trafficResponse.json());
       applySnapshot(await snapshotResponse.json());
     } catch (error) { console.warn("Initial telemetry load failed", error); }
   }
@@ -590,6 +689,20 @@
     button.classList.add("active"); state.filter = button.dataset.filter; renderDevices();
   }));
   elements.deviceRows.addEventListener("click", (event) => { const row = event.target.closest("tr[data-ip]"); if (row) openDevice(row.dataset.ip); });
+  elements.trafficTabs.addEventListener("click", (event) => {
+    const tab = event.target.closest("[role=tab]");
+    if (tab) selectTrafficSource(tab.dataset.sourceId);
+  });
+  elements.trafficTabs.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    const tabs = [...elements.trafficTabs.querySelectorAll("[role=tab]")];
+    if (!tabs.length) return;
+    const current = Math.max(0, tabs.indexOf(event.target.closest("[role=tab]")));
+    const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1
+      : (current + (event.key === "ArrowRight" ? 1 : -1) + tabs.length) % tabs.length;
+    event.preventDefault();
+    selectTrafficSource(tabs[next].dataset.sourceId, true);
+  });
   elements.topologyProfileButton.addEventListener("click", () => {
     if (state.selectedTopologyNode?.ip) openDevice(state.selectedTopologyNode.ip);
   });

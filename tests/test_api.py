@@ -33,6 +33,10 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'data-font-size="large"' in index.text
         assert "netpulse.fontSize" in index.text
         assert 'id="topologyNodeMetrics"' in index.text
+        assert 'id="trafficTabs"' in index.text
+        assert 'role="tablist"' in index.text
+        assert '/static/styles.css?v=20260813-traffic-stream' in index.text
+        assert '/static/app.js?v=20260813-traffic-stream' in index.text
 
         topology_script = client.get("/static/topology3d.js")
         assert topology_script.status_code == 200
@@ -101,7 +105,7 @@ def test_signed_agent_heartbeat(tmp_path):
     payload = {
         "node_id": "node-1234", "hostname": "workstation", "os_name": "Windows",
         "cpu_percent": 12.5, "memory_percent": 45.0, "disk_percent": 60.0,
-        "uptime_seconds": 86400,
+        "uptime_seconds": 86400, "rx_bps": 512.0, "tx_bps": 128.0,
     }
     body = json.dumps(payload, separators=(",", ":")).encode()
     timestamp = str(int(time.time()))
@@ -116,8 +120,19 @@ def test_signed_agent_heartbeat(tmp_path):
         agents = client.get("/api/v1/agents").json()
         assert agents["online"] == 1
         assert agents["items"][0]["hostname"] == "workstation"
+        app.state.monitor.latest["generated_at"] = time.time()
+        app.state.monitor.latest["network"].update(
+            {"interface": "eth0", "ip_address": "192.168.10.201", "rx_bps": 1024.0, "tx_bps": 256.0}
+        )
         snapshot = client.get("/api/v1/snapshot").json()
         assert snapshot["agents"]["items"][0]["cpu_percent"] == 12.5
+        assert snapshot["traffic"]["source_count"] == 2
+        assert snapshot["traffic"]["total"]["rx_bps"] == 1536.0
+        assert {item["id"] for item in snapshot["traffic"]["sources"]} == {"local", "agent:node-1234"}
+        traffic = client.get("/api/v1/traffic?minutes=1&points=20")
+        assert traffic.status_code == 200
+        assert len(traffic.json()["series"]["all"]) == 20
+        assert len(traffic.json()["series"]["agent:node-1234"]) == 20
 
 
 def test_agent_rejects_bad_signature(tmp_path):
@@ -173,10 +188,49 @@ def test_prometheus_exporter_nodes_are_separate_from_signed_agents(tmp_path):
         assert exporters["nodes"][0]["hostname"] == "nas"
         snapshot = client.get("/api/v1/snapshot").json()
         assert snapshot["exporters"]["nodes"][0]["cpu_percent"] == 10.0
+        assert snapshot["traffic"]["sources"][1]["id"] == "prometheus:exporter-test"
+        assert snapshot["traffic"]["total"]["rx_bps"] == 123.0
         assert client.get("/api/v1/agents").json()["total"] == 0
         metrics = client.get("/metrics").text
         assert 'netpulse_host_up{node_id="exporter-test",hostname="nas",source="prometheus",os="Linux"} 1' in metrics
         assert 'netpulse_prometheus_exporter_up{target="nas",kind="node_exporter"} 1' in metrics
+
+
+def test_traffic_sources_are_stable_and_do_not_double_count_same_ip(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path,
+        collector_enabled=False,
+        discovery_enabled=False,
+        prometheus_exporters_enabled=True,
+        prometheus_exporter_targets=("duplicate=http://192.168.10.50:9100/metrics",),
+    )
+    app = create_app(settings)
+    base = {
+        "os_name": "Linux", "cpu_percent": 10, "memory_percent": 20, "disk_percent": 30,
+        "uptime_seconds": 100, "tx_bps": 1,
+    }
+    with TestClient(app) as client:
+        client.portal.call(
+            app.state.database.upsert_agent,
+            {**base, "node_id": "zeta", "hostname": "zeta-host", "rx_bps": 20},
+            "192.168.10.50",
+        )
+        client.portal.call(
+            app.state.database.upsert_agent,
+            {**base, "node_id": "alpha", "hostname": "alpha-host", "rx_bps": 10},
+            "192.168.10.60",
+        )
+        client.portal.call(
+            app.state.database.upsert_agent,
+            {
+                **base, "node_id": "duplicate-exporter", "hostname": "zeta-host", "rx_bps": 999,
+                "metadata": {"collection_method": "prometheus", "target_name": "duplicate"},
+            },
+            "192.168.10.50",
+        )
+        traffic = client.get("/api/v1/snapshot").json()["traffic"]
+        assert [source["id"] for source in traffic["sources"]] == ["local", "agent:alpha", "agent:zeta"]
+        assert traffic["total"]["rx_bps"] == 30
 
 
 def test_qnap_snmp_details_and_metrics_exclude_credentials_and_serials(tmp_path):

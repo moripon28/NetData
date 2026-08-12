@@ -29,8 +29,19 @@ class TrafficCollector:
             tx_bps = max(0.0, (current.bytes_sent - self._previous[2]) / elapsed)
         if current is not None:
             self._previous = (now, current.bytes_recv, current.bytes_sent)
+        ip_address = None
+        if interface:
+            ip_address = next(
+                (
+                    address.address
+                    for address in psutil.net_if_addrs().get(interface, ())
+                    if address.family == socket.AF_INET
+                ),
+                None,
+            )
         return {
             "interface": interface or "unknown",
+            "ip_address": ip_address,
             "rx_bps": round(rx_bps, 1),
             "tx_bps": round(tx_bps, 1),
             "rx_total": current.bytes_recv if current else 0,

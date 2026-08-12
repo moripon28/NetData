@@ -148,8 +148,17 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 
 .traffic-panel, .system-panel { min-height: 290px; }
 .traffic-values { display: flex; gap: 22px; font: 11px var(--mono); }.traffic-values span { display: flex; gap: 7px; align-items: center; }.traffic-values i { font-style: normal; }.download { color: var(--mint); }.upload { color: var(--violet); }
+.traffic-source-strip { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: stretch; min-width: 0; border-bottom: 1px solid var(--line); background: rgba(0,0,0,.16); }
+.traffic-tabs { min-width: 0; display: flex; gap: 1px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: rgba(156,255,206,.28) transparent; }
+.traffic-tabs::-webkit-scrollbar { height: 4px; }.traffic-tabs::-webkit-scrollbar-thumb { background: rgba(156,255,206,.28); }
+.traffic-tab { flex: 0 0 auto; min-width: 88px; max-width: 170px; height: 38px; padding: 0 11px; border: 0; border-right: 1px solid var(--line); background: rgba(5,14,12,.92); color: var(--muted); display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font: 8px var(--mono); letter-spacing: .07em; }
+.traffic-tab.aggregate { position: sticky; left: 0; z-index: 2; min-width: 72px; color: var(--text); box-shadow: 8px 0 12px rgba(2,8,7,.82); }
+.traffic-tab i { width: 5px; height: 5px; flex: 0 0 5px; border-radius: 50%; background: var(--mint); box-shadow: 0 0 6px rgba(156,255,206,.7); }.traffic-tab.offline i { background: #52645f; box-shadow: none; }.traffic-tab.checking i { background: var(--orange); box-shadow: 0 0 6px rgba(255,182,92,.5); }
+.traffic-tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.traffic-tab:hover { color: var(--text); background: rgba(156,255,206,.06); }.traffic-tab[aria-selected="true"] { color: var(--mint); background: rgba(156,255,206,.105); box-shadow: inset 0 -2px var(--mint); }
+.traffic-source-count { min-width: 74px; display: grid; place-items: center; padding: 0 10px; border-left: 1px solid var(--line); color: var(--muted); font: 7px var(--mono); letter-spacing: .09em; white-space: nowrap; }
+.traffic-scope { min-height: 25px; padding: 7px 14px 0; display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font: 7px var(--mono); letter-spacing: .07em; }.traffic-scope b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #bfd4cb; font-weight: 500; }.traffic-scope span { flex: 0 0 auto; }
 .chart-wrap { height: 190px; padding: 14px 11px 0; } #trafficCanvas { width: 100%; height: 100%; display: block; }
-.command-rail .chart-wrap { height: 112px; }
+.command-rail .chart-wrap { height: 92px; }
 .chart-axis { display: flex; justify-content: space-between; padding: 0 22px 12px; color: var(--muted); font: 8px var(--mono); }
 .temperature { color: var(--muted); display: flex; gap: 7px; align-items: center; font: 11px var(--mono); }.temperature i { color: var(--mint); font-size: 8px; text-shadow: 0 0 8px var(--mint); }
 .system-metrics { padding: 18px 21px; display: grid; gap: 19px; }.system-metric { display: grid; gap: 7px; }.metric-top { display: flex; justify-content: space-between; align-items: baseline; }.metric-top span { font: 9px var(--mono); color: var(--muted); letter-spacing: .14em; }.metric-top strong { font: 14px var(--mono); }
@@ -201,6 +210,7 @@ dialog { width: min(460px, calc(100% - 30px)); color: var(--text); background: #
 }
 @media (max-width: 650px) {
   .topbar { height: 68px; }.brand small, .topbar time, .font-size-control > span { display: none; }.topbar-status { gap: 7px; }.font-size-control button { width: 25px; }.topbar-action { padding: 7px; }.dashboard { width: calc(100% - 24px); padding-top: 34px; }.intro { display: grid; }.intro-signal { margin-bottom: 12px; }.command-deck, .dashboard-grid, .command-rail { gap: 12px; }.command-rail { grid-template-columns: 1fr; grid-template-rows: auto; }.command-rail .health-panel { grid-column: 1; }.panel-head { padding: 14px 15px; }.topology-head-status .subnet-label { display: none; }.command-deck .topology-panel { min-height: 684px; }.command-deck .topology-stage { height: 620px; }.topology-scene-meta { left: 12px; top: 12px; }.topology-reticle { width: 180px; height: 180px; }.topology-node-label { min-width: 90px; max-width: 150px; padding: 6px; transform: translate(8px, -50%) scale(.88); transform-origin: left center; }.topology-node-label:hover, .topology-node-label.selected { transform: translate(10px, -50%) scale(.9); }.topology-node-label > small, .topology-node-label:not(.selected) .node-label-metrics { display: none; }.topology-node-label:nth-child(n+10):not(.selected) { display: none; }.topology-inspector { left: 12px; bottom: 12px; width: calc(100% - 24px); }.topology-node-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }.topology-legend { display: none; }.health-command-body { grid-template-columns: 1fr; }.command-rail .health-wrap { border-right: 0; border-bottom: 1px solid var(--line); }.traffic-values { gap: 9px; }.horizon-grid { grid-template-columns: 1fr; }.horizon-card, .horizon-card:nth-child(2) { border-right: 0; border-bottom: 1px solid var(--line); }.horizon-card:last-child { border-bottom: 0; }.devices-head, .llm-head { align-items: flex-start; flex-direction: column; }.panel-actions { width: 100%; }.panel-actions select { flex: 1; min-width: 0; }.llm-report-wrap { grid-template-columns: 1fr; }.llm-report-meta { border-right: 0; border-bottom: 1px solid var(--line); }.form-grid { grid-template-columns: 1fr; }.field-wide { grid-column: 1; }.device-controls { width: 100%; overflow-x: auto; }.search { flex: 1; }.event-list { grid-template-columns: 1fr; }.event-item, .event-item:nth-child(3n) { border-right: 0; } footer span:nth-child(2) { display: none; }
+  .traffic-source-count { min-width: 62px; padding: 0 6px; }.traffic-scope span { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; } }
 dialog textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px solid var(--line); background: #07100e; color: var(--text); padding: 11px; font: 12px/1.6 var(--sans); outline: 0; } dialog textarea:focus { border-color: rgba(156,255,206,.5); }
@@ -215,7 +225,7 @@ dialog textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px 
 .horizon-title small, .mini-status, .horizon-values span, .agent-node,
 .agent-setup-button, .filter, th, .device-identity small, .type-tag, .status,
 .event-time, footer, .dialog-head small, .secondary-action, .agent-command-section header span,
-.agent-copy-button { font-size: calc(8 * var(--ui-font-unit)); }
+.agent-copy-button, .traffic-tab, .traffic-source-count, .traffic-scope { font-size: calc(8 * var(--ui-font-unit)); }
 .topology-node-label .node-label-title strong, .node-label-metrics b,
 .topology-scene-meta b, .topology-node-metrics b, .command-rail .health-message,
 .command-rail .vital-item > span, .command-rail .vital-item strong,

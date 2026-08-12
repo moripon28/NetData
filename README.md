@@ -4,7 +4,7 @@ NetPulseは、Raspberry Pi 5で自宅LANを観測するローカルファース�
 
 ## できること
 
-- 2秒ごとの受信・送信速度をライブチャートで表示
+- Pi本体・Agent・Prometheus Exporterの受信／送信速度を合計または端末別タブでライブ表示
 - 接続端末を自動検出し、クライアント描画のWebGL 3Dトポロジーとパーティクルで通信を表現
 - RP5、QNAP、エージェント、Prometheus ExporterのCPU・メモリ・温度などを3Dノード上で確認
 - ゲートウェイの応答時間・パケットロス・オンライン端末数を表示
@@ -134,7 +134,7 @@ DHCPリースやローカルのMACベンダーデータベースとの連携は�
 
 パケット本文、閲覧URL、DNSクエリ内容の常時保存は、家庭内でもプライバシーへの影響が大きいため初期実装には入れていません。必要になった場合も、対象・保持期間・閲覧権限を明確にして追加するのがおすすめです。
 
-表示するRaspberry Piおよび各ホストのNIC通信量は、そのホスト自身が送受信した量です。ルーターを通るLAN全体の通信量、管理外端末ごとの実通信量、Wi-Fi無線統計を表すものではありません。これらが必要な場合は、ルーター/APのSNMPまたはAPI、管理スイッチのポートミラー、インライン観測点のいずれかが別途必要です。
+TRAFFIC STREAMの既定値は、Raspberry Pi本体とオンラインのAgent／Prometheus Exporterから取得できたNIC通信量の合計です。横スクロール式のタブで端末別の履歴へ切り替えられ、同じIPをAgentとExporterの両方で監視している場合は二重加算しません。各値はそのホスト自身が送受信した量であり、ルーターを通るLAN全体の通信量、管理外端末ごとの実通信量、Wi-Fi無線統計を表すものではありません。これらが必要な場合は、ルーター/APのSNMPまたはAPI、管理スイッチのポートミラー、インライン観測点のいずれかが別途必要です。
 
 ## ローカルLLM報告を有効にする
 
@@ -226,7 +226,7 @@ python -m pytest
 
 Windows PowerShellでは有効化コマンドを `.\.venv\Scripts\Activate.ps1` に読み替えてください。デモ表示は `DEMO_MODE=true` と `DATA_DIR=./data` を設定して `uvicorn app.main:app --reload --port 39080` を実行します。
 
-API仕様は `/docs` で確認できます。主要エンドポイントは `/api/v1/snapshot`、`/api/v1/history`、`/api/v1/connectivity`、`/api/v1/snmp`、`/api/v1/exporters`、`/api/v1/agents`、`/api/v1/events`、`/api/v1/llm/settings`、`/api/v1/llm/models`、`/api/v1/llm/reports`、`/ws/live` です。
+API仕様は `/docs` で確認できます。主要エンドポイントは `/api/v1/snapshot`、`/api/v1/history`、`/api/v1/traffic`、`/api/v1/connectivity`、`/api/v1/snmp`、`/api/v1/exporters`、`/api/v1/agents`、`/api/v1/events`、`/api/v1/llm/settings`、`/api/v1/llm/models`、`/api/v1/llm/reports`、`/ws/live` です。
 
 ## セキュリティ上の注意
 

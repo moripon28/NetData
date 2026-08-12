@@ -29,8 +29,10 @@ class MonitorService:
         self.system = SystemCollector()
         self.traffic = TrafficCollector(settings.preferred_interface)
         self.discovery = DeviceDiscovery()
-        self.gateway = settings.gateway_host or self.discovery.detect_gateway()
-        self.subnet = settings.validated_subnet() or self.discovery.detect_subnet()
+        self.gateway = settings.gateway_host or ("192.168.10.1" if settings.demo_mode else self.discovery.detect_gateway())
+        self.subnet = settings.validated_subnet() or (
+            "192.168.10.0/24" if settings.demo_mode else self.discovery.detect_subnet()
+        )
         self._network = ipaddress.ip_network(self.subnet, strict=False) if self.subnet else None
         self._device_stale_after = max(
             settings.offline_after,
@@ -194,7 +196,7 @@ class MonitorService:
             "network": {
                 key: sample.get(key)
                 for key in (
-                    "interface", "rx_bps", "tx_bps", "rx_total", "tx_total", "gateway",
+                    "interface", "ip_address", "rx_bps", "tx_bps", "rx_total", "tx_total", "gateway",
                     "gateway_latency_ms", "packet_loss_percent",
                 )
             },
@@ -217,6 +219,7 @@ class MonitorService:
             "insights": self.anomaly.last_result if self.settings.anomaly_enabled else {"status": "disabled"},
             "events": await self.database.events(12),
         }
+        self.latest["traffic"] = self._traffic_payload(agents, exporter_nodes)
         if self.broadcast:
             await self.broadcast(self.latest)
         return self.latest
@@ -232,8 +235,10 @@ class MonitorService:
             "items": agents,
         }
         exporters = dict(self.exporters_latest)
-        exporters["nodes"] = await self.exporter_nodes()
+        exporter_nodes = await self.exporter_nodes()
+        exporters["nodes"] = exporter_nodes
         snapshot["exporters"] = exporters
+        snapshot["traffic"] = self._traffic_payload(agents, exporter_nodes)
         snapshot["events"] = await self.database.events(12)
         return snapshot
 
@@ -261,6 +266,169 @@ class MonitorService:
         payload = dict(self.exporters_latest)
         payload["nodes"] = await self.exporter_nodes()
         return payload
+
+    def _traffic_payload(
+        self, agents: list[dict[str, Any]], exporter_nodes: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        network = self.latest.get("network", {}) if hasattr(self, "latest") else {}
+        interface = str(network.get("interface") or "detecting")
+        observed_at = self.latest.get("generated_at") if hasattr(self, "latest") else None
+        local_fresh = observed_at and time.time() - float(observed_at) <= max(5.0, self.settings.sample_interval * 3)
+        local_status = (
+            "online" if interface not in {"detecting", "unknown"} and local_fresh
+            else "offline" if interface not in {"detecting", "unknown"}
+            else "checking"
+        )
+        local = {
+            "id": "local",
+            "label": "Raspberry Pi 5",
+            "kind": "local",
+            "status": local_status,
+            "source_ip": network.get("ip_address"),
+            "interface": interface,
+            "rx_bps": max(0.0, float(network.get("rx_bps") or 0)),
+            "tx_bps": max(0.0, float(network.get("tx_bps") or 0)),
+            "observed_at": observed_at,
+        }
+        sources = [local]
+        seen = {f"ip:{local['source_ip']}"} if local.get("source_ip") else set()
+        for kind, nodes in (("agent", agents), ("prometheus", exporter_nodes)):
+            for node in sorted(
+                nodes,
+                key=lambda item: (str(item.get("hostname") or "").lower(), str(item.get("node_id") or "")),
+            ):
+                source_ip = str(node.get("source_ip") or "").strip()
+                hostname = str(node.get("hostname") or node.get("node_id") or kind).strip()
+                identity = f"ip:{source_ip}" if source_ip and source_ip != "unknown" else f"host:{hostname.lower()}"
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                online = node.get("status") == "online"
+                sources.append(
+                    {
+                        "id": f"{kind}:{node['node_id']}",
+                        "node_id": node["node_id"],
+                        "label": hostname,
+                        "kind": kind,
+                        "status": node.get("status", "unknown"),
+                        "source_ip": source_ip or None,
+                        "interface": None,
+                        "rx_bps": max(0.0, float(node.get("rx_bps") or 0)) if online else 0.0,
+                        "tx_bps": max(0.0, float(node.get("tx_bps") or 0)) if online else 0.0,
+                        "observed_at": node.get("last_seen"),
+                    }
+                )
+
+        online_sources = [source for source in sources if source["status"] == "online"]
+        total = {
+            "id": "all",
+            "label": "すべての端末",
+            "kind": "aggregate",
+            "status": "online" if online_sources else "checking",
+            "rx_bps": round(sum(source["rx_bps"] for source in online_sources), 1),
+            "tx_bps": round(sum(source["tx_bps"] for source in online_sources), 1),
+            "observed_at": self.latest.get("generated_at") if hasattr(self, "latest") else None,
+        }
+        return {
+            "total": total,
+            "sources": sources,
+            "source_count": len(sources),
+            "online_source_count": len(online_sources),
+        }
+
+    async def traffic_stream(self, minutes: int = 2, points: int = 60) -> dict[str, Any]:
+        agents = await self.agent_nodes()
+        exporter_nodes = await self.exporter_nodes()
+        payload = self._traffic_payload(agents, exporter_nodes)
+        sources = payload["sources"]
+        source_ids_by_node = {
+            (source["kind"], source.get("node_id")): source["id"]
+            for source in sources
+            if source["kind"] != "local"
+        }
+        local_history, host_history = await asyncio.gather(
+            self.database.history(minutes, limit=10_000),
+            self.database.host_traffic_history(
+                minutes,
+                [source["node_id"] for source in sources if source.get("node_id")],
+            ),
+        )
+        raw: dict[str, list[dict[str, float]]] = {source["id"]: [] for source in sources}
+        raw["local"] = [
+            {
+                "ts": float(sample["ts"]),
+                "rx_bps": max(0.0, float(sample.get("rx_bps") or 0)),
+                "tx_bps": max(0.0, float(sample.get("tx_bps") or 0)),
+            }
+            for sample in local_history
+        ]
+        for sample in host_history:
+            source_id = source_ids_by_node.get((sample["source_type"], sample["node_id"]))
+            if source_id:
+                raw[source_id].append(
+                    {
+                        "ts": float(sample["ts"]),
+                        "rx_bps": max(0.0, float(sample.get("rx_bps") or 0)),
+                        "tx_bps": max(0.0, float(sample.get("tx_bps") or 0)),
+                    }
+                )
+
+        now = time.time()
+        start = now - max(1, minutes) * 60
+        series: dict[str, list[dict[str, float]]] = {}
+        for source in sources:
+            current = {
+                "ts": now,
+                "rx_bps": source["rx_bps"],
+                "tx_bps": source["tx_bps"],
+            }
+            source_samples = [*raw.get(source["id"], ()), current]
+            if source["kind"] == "local":
+                stale_after = max(5.0, self.settings.sample_interval * 3)
+            elif source["kind"] == "prometheus":
+                stale_after = max(20.0, self.settings.prometheus_exporter_interval * 3)
+            else:
+                stale_after = float(self.settings.agent_offline_after)
+            series[source["id"]] = self._resample_traffic(
+                source_samples, start, now, points, stale_after
+            )
+
+        aggregate: list[dict[str, float]] = []
+        for index in range(points):
+            items = [values[index] for values in series.values()]
+            aggregate.append(
+                {
+                    "ts": items[0]["ts"] if items else now,
+                    "rx_bps": round(sum(item["rx_bps"] for item in items), 1),
+                    "tx_bps": round(sum(item["tx_bps"] for item in items), 1),
+                }
+            )
+        series["all"] = aggregate
+        return {**payload, "minutes": minutes, "points": points, "series": series}
+
+    @staticmethod
+    def _resample_traffic(
+        samples: list[dict[str, float]], start: float, end: float, points: int, stale_after: float
+    ) -> list[dict[str, float]]:
+        ordered = sorted(samples, key=lambda item: item["ts"])
+        step = (end - start) / max(1, points - 1)
+        result: list[dict[str, float]] = []
+        cursor = 0
+        latest: dict[str, float] | None = None
+        for index in range(points):
+            timestamp = start + step * index
+            while cursor < len(ordered) and ordered[cursor]["ts"] <= timestamp + 0.001:
+                latest = ordered[cursor]
+                cursor += 1
+            fresh = latest is not None and timestamp - latest["ts"] <= stale_after
+            result.append(
+                {
+                    "ts": timestamp,
+                    "rx_bps": round(latest["rx_bps"], 1) if fresh and latest else 0.0,
+                    "tx_bps": round(latest["tx_bps"], 1) if fresh and latest else 0.0,
+                }
+            )
+        return result
 
     async def _collector_loop(self) -> None:
         while self._running:
@@ -522,7 +690,7 @@ class MonitorService:
             "memory_total": 8_000_000_000, "disk_percent": 38.4, "disk_used": 48_000_000_000,
             "disk_total": 128_000_000_000, "temperature_c": round(49 + wave * 3, 1),
             "load_1m": 0.62, "load_5m": 0.55, "uptime_seconds": 483_920,
-            "interface": "eth0", "rx_bps": max(5000, round(2_400_000 + wave * 1_500_000 + random.random() * 850_000)),
+            "interface": "eth0", "ip_address": "192.168.10.201", "rx_bps": max(5000, round(2_400_000 + wave * 1_500_000 + random.random() * 850_000)),
             "tx_bps": max(2000, round(420_000 + math.sin(tick / 3) * 300_000 + random.random() * 180_000)),
             "rx_total": 184_000_000_000, "tx_total": 31_000_000_000, "gateway": "192.168.10.1",
             "gateway_latency_ms": round(2.1 + random.random() * 1.6, 1), "packet_loss_percent": 0.0,
@@ -533,10 +701,11 @@ class MonitorService:
         return {
             "type": "snapshot", "generated_at": time.time(),
             "system": {"cpu_percent": 0, "memory_percent": 0, "disk_percent": 0, "temperature_c": None},
-            "network": {"interface": "detecting", "rx_bps": 0, "tx_bps": 0, "gateway": self.gateway, "gateway_latency_ms": None, "packet_loss_percent": 0},
+            "network": {"interface": "detecting", "ip_address": None, "rx_bps": 0, "tx_bps": 0, "gateway": self.gateway, "gateway_latency_ms": None, "packet_loss_percent": 0},
             "summary": {"online_devices": 0, "total_devices": 0, "health_score": 0, "subnet": self.subnet},
             "devices": [], "connectivity": self.connectivity_latest, "snmp": self.snmp_latest,
             "exporters": self.exporters_latest,
             "agents": {"configured": bool(self.settings.agent_token), "online": 0, "total": 0, "items": []},
+            "traffic": {"total": {"id": "all", "label": "すべての端末", "kind": "aggregate", "status": "checking", "rx_bps": 0, "tx_bps": 0}, "sources": [], "source_count": 0, "online_source_count": 0},
             "insights": self.anomaly.last_result, "events": [],
         }

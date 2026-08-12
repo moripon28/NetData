@@ -140,6 +140,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def history(minutes: int = Query(60, ge=1, le=43_200)) -> dict[str, Any]:
         return {"minutes": minutes, "samples": await database.history(minutes)}
 
+    @app.get("/api/v1/traffic")
+    async def traffic(
+        minutes: int = Query(2, ge=1, le=1_440),
+        points: int = Query(60, ge=20, le=300),
+    ) -> dict[str, Any]:
+        return await service.traffic_stream(minutes, points)
+
     @app.get("/api/v1/devices")
     async def devices() -> dict[str, Any]:
         items = await service.devices()

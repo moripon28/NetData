@@ -82,10 +82,14 @@ async def test_database_round_trip(tmp_path):
             {
                 "node_id": "node-test", "hostname": "test-host", "os_name": "Linux", "cpu_percent": 12,
                 "memory_percent": 34, "disk_percent": 56, "uptime_seconds": 1000,
+                "rx_bps": 2048, "tx_bps": 256,
             },
             "192.168.10.50",
         )
         assert (await database.agents())[0]["status"] == "online"
+        traffic_history = await database.host_traffic_history(1, ["node-test"])
+        assert traffic_history[-1]["source_type"] == "agent"
+        assert traffic_history[-1]["rx_bps"] == 2048
 
         for value in (10.0, 11.0, 9.0, 10.5, 9.5, 10.0, 11.0, 9.0, 10.5, 9.5):
             await database.observe_baseline("test_metric", 12, value, 10)
