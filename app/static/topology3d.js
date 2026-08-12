@@ -12,6 +12,10 @@
 
   const TAU = Math.PI * 2;
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
+  const INITIAL_YAW = 0.26;
+  const INITIAL_PITCH = 0.48;
+  const MIN_PITCH = -0.85;
+  const MAX_PITCH = 1.05;
 
   function statusColor(node) {
     const status = String(node.status || "unknown").toLowerCase();
@@ -78,7 +82,8 @@
     let selectedId = null;
     let frame = 0;
     let lastFrameAt = 0;
-    let rotationOffset = 0.26;
+    let yawOffset = INITIAL_YAW;
+    let pitchOffset = INITIAL_PITCH;
     let dragStart = null;
     let dragDistance = 0;
     let projectedNodes = [];
@@ -147,19 +152,18 @@
       return { width: rect.width, height: rect.height, dpr };
     }
 
-    function rotateWorld(position, rotation) {
-      const cosine = Math.cos(rotation);
-      const sine = Math.sin(rotation);
-      const x = position[0] * cosine - position[2] * sine;
-      const z = position[0] * sine + position[2] * cosine;
-      const tilt = -0.16;
-      const tiltCosine = Math.cos(tilt);
-      const tiltSine = Math.sin(tilt);
-      return [x, position[1] * tiltCosine - z * tiltSine, position[1] * tiltSine + z * tiltCosine];
+    function rotateWorld(position, yaw, pitch) {
+      const yawCosine = Math.cos(yaw);
+      const yawSine = Math.sin(yaw);
+      const x = position[0] * yawCosine - position[2] * yawSine;
+      const z = position[0] * yawSine + position[2] * yawCosine;
+      const pitchCosine = Math.cos(pitch);
+      const pitchSine = Math.sin(pitch);
+      return [x, position[1] * pitchCosine - z * pitchSine, position[1] * pitchSine + z * pitchCosine];
     }
 
-    function project(position, rotation, size) {
-      const world = rotateWorld(position, rotation);
+    function project(position, view, size) {
+      const world = rotateWorld(position, view.yaw, view.pitch);
       const cameraDistance = 8.2;
       const depth = cameraDistance - world[2];
       const focal = 2.25;
@@ -195,7 +199,10 @@
     }
 
     function buildScene(now, size) {
-      const rotation = rotationOffset + (reducedMotion.matches ? 0 : now * 0.000035);
+      const view = {
+        yaw: yawOffset + (reducedMotion.matches ? 0 : now * 0.000035),
+        pitch: pitchOffset,
+      };
       const lines = [];
       const points = [];
       const ringColor = COLORS.cyan;
@@ -209,7 +216,7 @@
             if (axis === "yz") return [0, Math.cos(angle) * radius, Math.sin(angle) * radius];
             return [Math.cos(angle) * radius, 0, Math.sin(angle) * radius];
           });
-          appendLine(lines, project(worldPoints[0], rotation, size), project(worldPoints[1], rotation, size), ringColor, alpha);
+          appendLine(lines, project(worldPoints[0], view, size), project(worldPoints[1], view, size), ringColor, alpha);
         }
       };
 
@@ -228,12 +235,12 @@
         for (let index = 0; index < segments; index += 1) {
           const start = index / segments * TAU;
           const end = (index + 1) / segments * TAU;
-          appendLine(lines, project([Math.cos(start) * radius, y, Math.sin(start) * radius], rotation, size), project([Math.cos(end) * radius, y, Math.sin(end) * radius], rotation, size), COLORS.mint, 0.055);
+          appendLine(lines, project([Math.cos(start) * radius, y, Math.sin(start) * radius], view, size), project([Math.cos(end) * radius, y, Math.sin(end) * radius], view, size), COLORS.mint, 0.055);
         }
       });
 
-      projectedNodes = nodes.map((node) => ({ node, projected: project(node.position, rotation, size) }));
-      const coreProjection = project([0, 0, 0], rotation, size);
+      projectedNodes = nodes.map((node) => ({ node, projected: project(node.position, view, size) }));
+      const coreProjection = project([0, 0, 0], view, size);
 
       projectedNodes.forEach(({ node, projected }, index) => {
         const color = statusColor(node);
@@ -244,7 +251,7 @@
           for (let particleIndex = 0; particleIndex < particleCount; particleIndex += 1) {
             const progress = ((now * (0.0001 + particleIndex * 0.000025) + index * 0.173 + particleIndex * 0.41) % 1);
             const world = node.position.map((value) => value * progress);
-            const particle = project(world, rotation, size);
+            const particle = project(world, view, size);
             points.push(particle.x, particle.y, 5.5 * particle.scale, color[0], color[1], color[2], 0.72);
           }
         }
@@ -261,7 +268,7 @@
       for (let index = 0; index < segments; index += 1) {
         const start = index / segments * TAU;
         const end = (index + 1) / segments * TAU;
-        appendLine(lines, project([Math.cos(start) * scanRadius, scanY, Math.sin(start) * scanRadius], rotation, size), project([Math.cos(end) * scanRadius, scanY, Math.sin(end) * scanRadius], rotation, size), COLORS.cyan, 0.34);
+        appendLine(lines, project([Math.cos(start) * scanRadius, scanY, Math.sin(start) * scanRadius], view, size), project([Math.cos(end) * scanRadius, scanY, Math.sin(end) * scanRadius], view, size), COLORS.cyan, 0.34);
       }
 
       return { lines, points };
@@ -361,7 +368,11 @@
         if (!label) {
           label = document.createElement("button");
           label.type = "button";
-          label.addEventListener("click", (event) => { event.stopPropagation(); select(label.dataset.nodeId); });
+          label.addEventListener("click", (event) => {
+            event.stopPropagation();
+            if (dragDistance >= 5) { event.preventDefault(); return; }
+            select(label.dataset.nodeId);
+          });
           labels.set(node.id, label);
           labelLayer.append(label);
         }
@@ -410,19 +421,41 @@
       if (selectedId) select(selectedId);
     }
 
-    canvas.addEventListener("pointerdown", (event) => {
-      dragStart = { x: event.clientX, rotation: rotationOffset };
+    const interactionSurface = canvas.parentElement || canvas;
+
+    function beginPointerInteraction(event) {
+      if (event.button !== undefined && event.button !== 0) return;
+      const label = event.target?.closest?.(".topology-node-label");
+      if (event.target !== canvas && !label) return;
+      const captureTarget = label || canvas;
+      dragStart = {
+        x: event.clientX,
+        y: event.clientY,
+        yaw: yawOffset,
+        pitch: pitchOffset,
+        pointerId: event.pointerId,
+        nodeId: label?.dataset.nodeId || null,
+        captureTarget,
+      };
       dragDistance = 0;
-      canvas.setPointerCapture?.(event.pointerId);
-    });
-    canvas.addEventListener("pointermove", (event) => {
-      if (!dragStart) return;
-      const delta = event.clientX - dragStart.x;
-      dragDistance = Math.max(dragDistance, Math.abs(delta));
-      rotationOffset = dragStart.rotation + delta * 0.006;
-    });
-    canvas.addEventListener("pointerup", (event) => {
-      if (dragStart && dragDistance < 5) {
+      interactionSurface.classList.add("is-dragging");
+      captureTarget.setPointerCapture?.(event.pointerId);
+    }
+
+    function movePointerInteraction(event) {
+      if (!dragStart || event.pointerId !== dragStart.pointerId) return;
+      const deltaX = event.clientX - dragStart.x;
+      const deltaY = event.clientY - dragStart.y;
+      dragDistance = Math.max(dragDistance, Math.hypot(deltaX, deltaY));
+      yawOffset = dragStart.yaw + deltaX * 0.006;
+      pitchOffset = clamp(dragStart.pitch + deltaY * 0.005, MIN_PITCH, MAX_PITCH);
+      event.preventDefault();
+    }
+
+    function endPointerInteraction(event) {
+      if (!dragStart || event.pointerId !== dragStart.pointerId) return;
+      const completedDrag = dragStart;
+      if (dragDistance < 5 && !completedDrag.nodeId) {
         const rect = canvas.getBoundingClientRect();
         const x = event.clientX - rect.left;
         const y = event.clientY - rect.top;
@@ -433,16 +466,36 @@
         if (nearest) select(nearest.node.id);
       }
       dragStart = null;
-      canvas.releasePointerCapture?.(event.pointerId);
-    });
-    canvas.addEventListener("pointercancel", () => { dragStart = null; });
+      interactionSurface.classList.remove("is-dragging");
+      completedDrag.captureTarget.releasePointerCapture?.(event.pointerId);
+      window.setTimeout(() => { if (!dragStart) dragDistance = 0; }, 0);
+    }
+
+    function cancelPointerInteraction(event) {
+      if (!dragStart || event.pointerId !== dragStart.pointerId) return;
+      dragStart = null;
+      dragDistance = 0;
+      interactionSurface.classList.remove("is-dragging");
+    }
+
+    interactionSurface.addEventListener("pointerdown", beginPointerInteraction);
+    window.addEventListener("pointermove", movePointerInteraction, { passive: false });
+    window.addEventListener("pointerup", endPointerInteraction);
+    window.addEventListener("pointercancel", cancelPointerInteraction);
 
     frame = window.requestAnimationFrame(render);
     return {
       setNodes,
       select,
       get mode() { return webglReady ? "webgl" : "fallback"; },
-      destroy() { window.cancelAnimationFrame(frame); labelLayer.replaceChildren(); },
+      destroy() {
+        window.cancelAnimationFrame(frame);
+        interactionSurface.removeEventListener("pointerdown", beginPointerInteraction);
+        window.removeEventListener("pointermove", movePointerInteraction);
+        window.removeEventListener("pointerup", endPointerInteraction);
+        window.removeEventListener("pointercancel", cancelPointerInteraction);
+        labelLayer.replaceChildren();
+      },
     };
   }
 
