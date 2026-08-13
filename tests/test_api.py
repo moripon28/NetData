@@ -27,7 +27,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert index.status_code == 200
         assert "NETPULSE" in index.text
         assert "EASY SETUP" in index.text
-        assert 'src="/static/topology3d.js"' in index.text
+        assert 'src="/static/topology3d.js?v=20260813-topology-declutter2"' in index.text
         assert 'data-font-size="small"' in index.text
         assert 'data-font-size="medium"' in index.text
         assert 'data-font-size="large"' in index.text
@@ -38,19 +38,27 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'id="llmFlavorStream"' in index.text
         assert 'id="llmFlavorScope"' in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
-        assert '/static/styles.css?v=20260813-topology-label-scale' in index.text
-        assert '/static/app.js?v=20260813-llm-echo' in index.text
+        assert '/static/styles.css?v=20260813-topology-declutter2' in index.text
+        assert '/static/app.js?v=20260813-topology-declutter2' in index.text
 
         topology_script = client.get("/static/topology3d.js")
         assert topology_script.status_code == 200
         assert "NetPulseTopology3D" in topology_script.text
+        assert "findLabelPlacement" in topology_script.text
+        assert "reservedLabelRects" in topology_script.text
+
+        app_script = client.get("/static/app.js")
+        assert app_script.status_code == 200
+        assert "offlineGroupMinimum = 4" in app_script.text
+        assert "INACTIVE DEVICES ×" in app_script.text
 
         styles = client.get("/static/styles.css")
         assert styles.status_code == 200
         assert ".command-rail .health-orbit { width: 116px; height: 116px; }" in styles.text
         assert ".command-rail .health-ring { width: 100px; height: 100px; }" in styles.text
-        assert "max-width: calc(180 * var(--ui-font-unit))" in styles.text
+        assert "min-width: calc(96 * var(--ui-font-unit))" in styles.text
         assert "max-width: calc(150 * var(--ui-font-unit))" in styles.text
+        assert ".topology-node-label.selected .node-label-metrics { display: flex; }" in styles.text
 
         metrics = client.get("/metrics")
         assert metrics.status_code == 200

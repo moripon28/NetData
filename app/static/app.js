@@ -61,6 +61,9 @@
   const fontSizes = new Set(["small", "medium", "large"]);
   const fontSizeButtons = [...document.querySelectorAll("[data-font-size]")];
   const maxPoints = 60;
+  const topologyNodeLimit = 18;
+  const offlineGroupMinimum = 4;
+  const inactiveTopologyStatuses = new Set(["offline", "unreachable", "unknown", "disabled"]);
   const typeIcons = { router: "⌁", computer: "▣", phone: "▯", tablet: "▭", tv: "▰", iot: "◇", server: "▤", printer: "▥", camera: "◉", game: "✦", unknown: "?" };
 
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
@@ -638,26 +641,63 @@
     (snapshot.agents?.items || []).slice(0, 6).forEach((host, index) => appendHostNode(host, "agent", index));
     (snapshot.exporters?.nodes || []).slice(0, 6).forEach((host, index) => appendHostNode(host, "exporter", index));
 
-    const remainingSlots = Math.max(0, 18 - nodes.length);
-    [...state.devices]
+    const topologyDevices = [...state.devices]
       .filter((device) => !representedIps.has(device.ip))
-      .sort((first, second) => Number(second.status === "online") - Number(first.status === "online"))
-      .slice(0, remainingSlots)
-      .forEach((device) => {
-        nodes.push({
-          id: `device:${device.ip}`, role: "device", kind: "device", status: device.status || "unknown", ip: device.ip,
-          title: device.display_name || device.hostname || device.ip, subtitle: `${String(device.device_type || "unknown").toUpperCase()} · ${device.ip}`,
-          metrics: compactMetrics(
-            metric("LATENCY", device.latency_ms == null ? "—" : `${Number(device.latency_ms).toFixed(1)} ms`),
-            metric("SEEN", relativeTime(device.last_seen)), metric("TRUST", device.is_trusted ? "TRUSTED" : "UNSET"),
-          ),
-          description: "LAN探索で検出した端末です。CPUやメモリはエージェントまたはExporterを導入した場合だけ取得できます。",
-        });
+      .sort((first, second) => Number(inactiveTopologyStatuses.has(String(first.status || "unknown").toLowerCase())) - Number(inactiveTopologyStatuses.has(String(second.status || "unknown").toLowerCase())) || String(first.ip).localeCompare(String(second.ip)));
+    const inactiveDevices = topologyDevices.filter((device) => inactiveTopologyStatuses.has(String(device.status || "unknown").toLowerCase()));
+    const activeDevices = topologyDevices.filter((device) => !inactiveTopologyStatuses.has(String(device.status || "unknown").toLowerCase()));
+    const inactiveHostNodes = nodes.filter((node) => ["agent", "exporter"].includes(node.role) && inactiveTopologyStatuses.has(String(node.status || "unknown").toLowerCase()));
+    const inactiveCandidates = [...inactiveHostNodes, ...inactiveDevices];
+    const shouldGroupInactive = inactiveCandidates.length >= offlineGroupMinimum;
+
+    if (shouldGroupInactive) {
+      const inactiveHostIds = new Set(inactiveHostNodes.map((node) => node.id));
+      for (let index = nodes.length - 1; index >= 0; index -= 1) {
+        if (inactiveHostIds.has(nodes[index].id)) nodes.splice(index, 1);
+      }
+    }
+
+    const remainingSlots = Math.max(0, topologyNodeLimit - nodes.length - (shouldGroupInactive ? 1 : 0));
+    const individualDevices = (shouldGroupInactive ? activeDevices : topologyDevices).slice(0, remainingSlots);
+
+    individualDevices.forEach((device) => {
+      nodes.push({
+        id: `device:${device.ip}`, role: "device", kind: "device", status: device.status || "unknown", ip: device.ip,
+        title: device.display_name || device.hostname || device.ip, subtitle: `${String(device.device_type || "unknown").toUpperCase()} · ${device.ip}`,
+        metrics: compactMetrics(
+          metric("LATENCY", device.latency_ms == null ? "—" : `${Number(device.latency_ms).toFixed(1)} ms`),
+          metric("SEEN", relativeTime(device.last_seen)), metric("TRUST", device.is_trusted ? "TRUSTED" : "UNSET"),
+        ),
+        description: "LAN探索で検出した端末です。CPUやメモリはエージェントまたはExporterを導入した場合だけ取得できます。",
       });
+    });
+
+    if (shouldGroupInactive) {
+      const statusCounts = inactiveCandidates.reduce((counts, node) => {
+        const status = String(node.status || "unknown").toLowerCase();
+        counts[status] = (counts[status] || 0) + 1;
+        return counts;
+      }, {});
+      const otherCount = inactiveCandidates.length - (statusCounts.offline || 0);
+      nodes.push({
+        id: "group:inactive-devices", role: "device-group", kind: "device-group", status: "offline",
+        title: `INACTIVE DEVICES ×${inactiveCandidates.length}`,
+        subtitle: "OFFLINE · UNREACHABLE · UNKNOWN",
+        metrics: compactMetrics(
+          metric("COUNT", String(inactiveCandidates.length)),
+          metric("OFFLINE", String(statusCounts.offline || 0)),
+          metric("OTHER", String(otherCount)),
+        ),
+        groupCount: inactiveCandidates.length,
+        description: `${inactiveCandidates.length}台のオフライン・到達不能・状態不明の端末・監視ホストをまとめて表示しています。個別の状態は下の接続端末一覧とAGENT FLEETで確認できます。`,
+      });
+    }
 
     state.topologyNodes = nodes;
     const liveCount = nodes.filter((node) => topologyStatusClass(node.status) === "online").length;
-    elements.topologyNodeCount.textContent = `${liveCount} LIVE / ${nodes.length} NODES`;
+    const totalCount = nodes.reduce((total, node) => total + Math.max(1, Number(node.groupCount) || 1), 0);
+    const groupedCount = nodes.reduce((total, node) => total + (Number(node.groupCount) || 0), 0);
+    elements.topologyNodeCount.textContent = `${liveCount} LIVE / ${totalCount} NODES${groupedCount ? ` · ${groupedCount} GROUPED` : ""}`;
     state.topologyScene?.setNodes(nodes);
   }
 

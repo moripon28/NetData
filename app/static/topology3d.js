@@ -16,6 +16,14 @@
   const INITIAL_PITCH = 0.48;
   const MIN_PITCH = -0.85;
   const MAX_PITCH = 1.05;
+  const LABEL_MARGIN = 10;
+  const LABEL_GAP = 7;
+  const LABEL_RESERVED_SELECTORS = [
+    ".topology-scene-meta",
+    ".llm-flavor-stream",
+    ".topology-inspector",
+    ".topology-legend",
+  ];
 
   function statusColor(node) {
     const status = String(node.status || "unknown").toLowerCase();
@@ -326,15 +334,120 @@
       }
     }
 
-    function updateLabelPositions() {
+    function intersectionArea(first, second, padding = 0) {
+      const width = Math.min(first.right + padding, second.right + padding) - Math.max(first.left - padding, second.left - padding);
+      const height = Math.min(first.bottom + padding, second.bottom + padding) - Math.max(first.top - padding, second.top - padding);
+      return width > 0 && height > 0 ? width * height : 0;
+    }
+
+    function reservedLabelRects(stageRect) {
+      return LABEL_RESERVED_SELECTORS.flatMap((selector) => {
+        const element = interactionSurface.querySelector(selector);
+        if (!element || element.hidden || getComputedStyle(element).display === "none") return [];
+        const rect = element.getBoundingClientRect();
+        return [{
+          left: rect.left - stageRect.left,
+          top: rect.top - stageRect.top,
+          right: rect.right - stageRect.left,
+          bottom: rect.bottom - stageRect.top,
+        }];
+      });
+    }
+
+    function labelCandidates(anchor, width, height, size) {
+      const angles = [0, -Math.PI / 4, Math.PI / 4, Math.PI, -Math.PI * 3 / 4, Math.PI * 3 / 4, -Math.PI / 2, Math.PI / 2];
+      const candidates = [];
+      const seen = new Set();
+      for (let ring = 0; ring < 7; ring += 1) {
+        angles.forEach((angle) => {
+          const horizontalDistance = LABEL_GAP + width / 2 + ring * 30;
+          const verticalDistance = LABEL_GAP + height / 2 + ring * 24;
+          const rawX = anchor.x + Math.cos(angle) * horizontalDistance - width / 2;
+          const rawY = anchor.y + Math.sin(angle) * verticalDistance - height / 2;
+          const x = clamp(rawX, LABEL_MARGIN, Math.max(LABEL_MARGIN, size.width - LABEL_MARGIN - width));
+          const y = clamp(rawY, LABEL_MARGIN, Math.max(LABEL_MARGIN, size.height - LABEL_MARGIN - height));
+          const key = `${Math.round(x)}:${Math.round(y)}`;
+          if (seen.has(key)) return;
+          seen.add(key);
+          candidates.push({
+            x, y,
+            edgePenalty: Math.abs(rawX - x) + Math.abs(rawY - y),
+            distance: Math.hypot(x + width / 2 - anchor.x, y + height / 2 - anchor.y),
+          });
+        });
+      }
+      return candidates;
+    }
+
+    function findLabelPlacement(anchor, width, height, size, occupied, reserved, previous) {
+      let best = null;
+      labelCandidates(anchor, width, height, size).forEach((candidate) => {
+        const rect = { left: candidate.x, top: candidate.y, right: candidate.x + width, bottom: candidate.y + height };
+        const occupiedOverlap = occupied.reduce((total, item) => total + intersectionArea(rect, item, LABEL_GAP), 0);
+        const reservedOverlap = reserved.reduce((total, item) => total + intersectionArea(rect, item, LABEL_GAP + 2), 0);
+        const movement = previous ? Math.hypot(candidate.x - previous.x, candidate.y - previous.y) : 0;
+        const score = occupiedOverlap * 900 + reservedOverlap * 1500 + candidate.edgePenalty * 30 + candidate.distance + movement * 0.08;
+        if (!best || score < best.score) best = { ...candidate, rect, score };
+      });
+      return best;
+    }
+
+    function updateLabelLeader(label, placement, anchor, width, height) {
+      const centerX = placement.x + width / 2;
+      const centerY = placement.y + height / 2;
+      const deltaX = anchor.x - centerX;
+      const deltaY = anchor.y - centerY;
+      const normalizedDistance = Math.max(Math.abs(deltaX) / Math.max(1, width / 2), Math.abs(deltaY) / Math.max(1, height / 2));
+      const edgeScale = normalizedDistance > 1 ? 1 / normalizedDistance : 1;
+      const edgeX = centerX + deltaX * edgeScale;
+      const edgeY = centerY + deltaY * edgeScale;
+      const leaderX = anchor.x - edgeX;
+      const leaderY = anchor.y - edgeY;
+      label.style.setProperty("--leader-left", `${edgeX - placement.x}px`);
+      label.style.setProperty("--leader-top", `${edgeY - placement.y}px`);
+      label.style.setProperty("--leader-length", `${Math.hypot(leaderX, leaderY)}px`);
+      label.style.setProperty("--leader-angle", `${Math.atan2(leaderY, leaderX)}rad`);
+    }
+
+    function updateLabelPositions(size) {
+      const stageRect = interactionSurface.getBoundingClientRect();
+      const ordered = projectedNodes
+        .filter(({ projected }) => projected.visible)
+        .sort((first, second) => {
+          if (first.node.id === selectedId) return -1;
+          if (second.node.id === selectedId) return 1;
+          if (first.node.role === "core") return -1;
+          if (second.node.role === "core") return 1;
+          return first.projected.depth - second.projected.depth;
+        });
+
       projectedNodes.forEach(({ node, projected }) => {
         const label = labels.get(node.id);
         if (!label) return;
-        label.style.left = `${projected.screenX}px`;
-        label.style.top = `${projected.screenY}px`;
-        label.style.zIndex = String(Math.round(1000 - projected.depth * 50));
         label.hidden = !projected.visible;
         label.classList.toggle("is-back", projected.depth > 8.45 && node.id !== selectedId);
+      });
+
+      const reserved = reservedLabelRects(stageRect);
+      const occupied = [];
+      const measured = ordered.map(({ node, projected }) => {
+        const label = labels.get(node.id);
+        if (!label || label.hidden) return null;
+        const width = label.offsetWidth;
+        const height = label.offsetHeight;
+        return width > 0 && height > 0 ? { node, projected, label, width, height } : null;
+      }).filter(Boolean);
+
+      measured.forEach(({ node, projected, label, width, height }) => {
+        const anchor = { x: projected.screenX, y: projected.screenY };
+        const placement = findLabelPlacement(anchor, width, height, size, occupied, reserved, label._layoutPosition);
+        if (!placement) return;
+        label._layoutPosition = { x: placement.x, y: placement.y };
+        label.style.left = `${placement.x}px`;
+        label.style.top = `${placement.y}px`;
+        label.style.zIndex = String(node.id === selectedId ? 1100 : Math.round(1000 - projected.depth * 50));
+        updateLabelLeader(label, placement, anchor, width, height);
+        occupied.push(placement.rect);
       });
     }
 
@@ -344,7 +457,7 @@
         const size = dimensions();
         const scene = buildScene(now, size);
         if (webglReady) drawWebgl(scene, size); else drawFallback(scene, size);
-        updateLabelPositions();
+        updateLabelPositions(size);
         lastFrameAt = now;
       }
       frame = window.requestAnimationFrame(render);
@@ -380,6 +493,7 @@
         label.type = "button";
         label.className = "topology-node-label";
         if (node.id === selectedId) label.classList.add("selected");
+        if (node.groupCount > 1) label.classList.add("is-group");
         if (["offline", "unreachable", "disabled", "unknown"].includes(String(node.status).toLowerCase())) label.classList.add("is-offline");
         if (["warning", "degraded", "checking", "learning"].includes(String(node.status).toLowerCase())) label.classList.add("is-warning");
         label.setAttribute("aria-label", `${node.title} の情報を表示`);
