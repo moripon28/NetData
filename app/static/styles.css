@@ -52,7 +52,7 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 .live-pill.connected { color: var(--mint); }.live-pill.disconnected { color: var(--danger); }
 @keyframes pulse { 50% { opacity: .25; transform: scale(.72); } }
 
-.dashboard { width: min(1520px, calc(100% - clamp(28px, 6vw, 92px))); margin: 0 auto; padding: 54px 0 52px; position: relative; z-index: 1; }
+.dashboard { width: min(1680px, calc(100% - clamp(28px, 6vw, 92px))); margin: 0 auto; padding: 54px 0 52px; position: relative; z-index: 1; }
 .intro { display: flex; justify-content: space-between; align-items: flex-end; gap: 32px; margin: 0 0 24px; }
 .eyebrow { color: var(--mint); font: 10px var(--mono); letter-spacing: .26em; margin: 0 0 15px; }
 .intro h1 { font-size: clamp(31px, 3.7vw, 58px); line-height: 1.09; letter-spacing: -.045em; margin: 0; font-weight: 560; }
