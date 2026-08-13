@@ -84,7 +84,7 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 .render-mode { color: var(--cyan); border: 1px solid rgba(76,231,219,.2); padding: 5px 7px; font: 7px var(--mono); letter-spacing: .1em; }
 .render-mode.fallback { color: var(--orange); border-color: rgba(255,182,92,.26); }
 .topology-label-layer { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
-.topology-node-label { --node-color: 156,255,206; position: absolute; width: max-content; max-width: 180px; min-width: 118px; transform: translate(14px, -50%); padding: 7px 9px 6px; text-align: left; color: var(--text); border: 1px solid rgba(var(--node-color), .22); border-left: 2px solid rgba(var(--node-color), .85); background: linear-gradient(90deg, rgba(5,18,18,.92), rgba(5,12,13,.7)); backdrop-filter: blur(8px); pointer-events: auto; cursor: grab; touch-action: none; font-family: var(--mono); transition: opacity .2s, border-color .2s, background .2s, transform .2s; }
+.topology-node-label { --node-color: 156,255,206; position: absolute; width: max-content; max-width: calc(180 * var(--ui-font-unit)); min-width: calc(118 * var(--ui-font-unit)); transform: translate(14px, -50%); padding: 7px 9px 6px; text-align: left; color: var(--text); border: 1px solid rgba(var(--node-color), .22); border-left: 2px solid rgba(var(--node-color), .85); background: linear-gradient(90deg, rgba(5,18,18,.92), rgba(5,12,13,.7)); backdrop-filter: blur(8px); pointer-events: auto; cursor: grab; touch-action: none; font-family: var(--mono); transition: opacity .2s, border-color .2s, background .2s, transform .2s; }
 .topology-stage.is-dragging .topology-node-label { cursor: grabbing; }
 .topology-node-label::before { content: ""; position: absolute; width: 15px; height: 1px; right: 100%; top: 50%; background: rgba(var(--node-color), .5); }
 .topology-node-label:hover, .topology-node-label.selected { border-color: rgba(var(--node-color), .7); background: linear-gradient(90deg, rgba(var(--node-color), .12), rgba(5,12,13,.86)); transform: translate(17px, -50%); }
@@ -92,9 +92,9 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 .topology-node-label.is-offline { --node-color: 102,117,111; }
 .topology-node-label.is-warning { --node-color: 255,182,92; }
 .topology-node-label .node-label-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.topology-node-label .node-label-title strong { max-width: 125px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; letter-spacing: .06em; }
+.topology-node-label .node-label-title strong { max-width: calc(125 * var(--ui-font-unit)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; letter-spacing: .06em; }
 .topology-node-label .node-label-title i { width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: rgb(var(--node-color)); box-shadow: 0 0 8px rgba(var(--node-color), .8); }
-.topology-node-label > small { display: block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; color: #6d857d; font-size: 6px; letter-spacing: .08em; }
+.topology-node-label > small { display: block; max-width: calc(150 * var(--ui-font-unit)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 3px; color: #6d857d; font-size: 6px; letter-spacing: .08em; }
 .node-label-metrics { display: flex; gap: 8px; margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(var(--node-color), .1); }
 .node-label-metrics span { color: #728c83; font-size: 6px; letter-spacing: .06em; }
 .node-label-metrics b { color: rgb(var(--node-color)); margin-left: 3px; font-size: 7px; }
