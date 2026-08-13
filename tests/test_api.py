@@ -37,7 +37,8 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'role="tablist"' in index.text
         assert 'id="llmFlavorStream"' in index.text
         assert 'id="llmFlavorScope"' in index.text
-        assert '/static/styles.css?v=20260813-llm-echo' in index.text
+        assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
+        assert '/static/styles.css?v=20260813-layout-tuning-intro-compact' in index.text
         assert '/static/app.js?v=20260813-llm-echo' in index.text
 
         topology_script = client.get("/static/topology3d.js")

@@ -53,18 +53,17 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 @keyframes pulse { 50% { opacity: .25; transform: scale(.72); } }
 
 .dashboard { width: min(1520px, calc(100% - clamp(28px, 6vw, 92px))); margin: 0 auto; padding: 54px 0 52px; position: relative; z-index: 1; }
-.intro { display: flex; justify-content: space-between; align-items: flex-end; gap: 32px; margin: 0 0 42px; }
+.intro { display: flex; justify-content: space-between; align-items: flex-end; gap: 32px; margin: 0 0 24px; }
 .eyebrow { color: var(--mint); font: 10px var(--mono); letter-spacing: .26em; margin: 0 0 15px; }
 .intro h1 { font-size: clamp(31px, 3.7vw, 58px); line-height: 1.09; letter-spacing: -.045em; margin: 0; font-weight: 560; }
 .intro h1 em { color: var(--mint); font-style: normal; text-shadow: 0 0 32px rgba(156,255,206,.2); }
-.intro-copy { color: var(--muted); line-height: 1.8; max-width: 420px; margin: 0 0 5px; font-size: 13px; }
 .intro-signal { display: flex; align-items: center; gap: 5px; color: #557068; font: 7px var(--mono); letter-spacing: .18em; }
 .intro-signal i { width: 3px; height: 11px; background: rgba(156,255,206,.22); }
 .intro-signal i:nth-child(2) { height: 19px; background: rgba(76,231,219,.55); box-shadow: 0 0 9px rgba(76,231,219,.45); }
 .intro-signal i:nth-child(3) { height: 7px; margin-right: 6px; }
 
 .dashboard-grid { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(290px, .72fr); gap: 18px; }
-.command-deck { display: grid; grid-template-columns: minmax(0, 1.85fr) minmax(360px, .72fr); gap: 18px; margin-bottom: 18px; }
+.command-deck { display: grid; grid-template-columns: minmax(0, 2fr) minmax(350px, .68fr); gap: 18px; margin-bottom: 18px; }
 .command-rail { min-width: 0; display: grid; grid-template-rows: minmax(0, 1.22fr) minmax(0, .92fr) minmax(0, .86fr); gap: 18px; }
 .panel { background: linear-gradient(145deg, rgba(14,30,26,.88), rgba(7,15,14,.9)); border: 1px solid var(--line); position: relative; overflow: hidden; box-shadow: inset 0 1px rgba(255,255,255,.015), 0 22px 70px rgba(0,0,0,.16); }
 .panel::after { content: ""; position: absolute; inset: 0; pointer-events: none; border: 1px solid transparent; background: linear-gradient(120deg, rgba(156,255,206,.08), transparent 28%) border-box; mask: linear-gradient(#000 0 0) padding-box, linear-gradient(#000 0 0); mask-composite: exclude; }
@@ -139,7 +138,8 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 .health-command-body { min-height: 0; display: grid; grid-template-columns: 148px minmax(0, 1fr); }
 .health-wrap { display: grid; place-items: center; padding: 24px 20px 17px; border-bottom: 1px solid var(--line); }
 .command-rail .health-wrap { padding: 13px 8px; border-right: 1px solid var(--line); border-bottom: 0; }
-.command-rail .health-orbit { width: 125px; height: 125px; }
+.command-rail .health-orbit { width: 116px; height: 116px; }
+.command-rail .health-ring { width: 132px; height: 132px; }
 .command-rail .health-value strong { font-size: 36px; }
 .command-rail .health-message { max-width: 130px; text-align: center; font-size: 8px; line-height: 1.45; }
 .command-rail .vital-list { padding: 0 15px; }
@@ -253,6 +253,6 @@ dialog textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px 
 .vital-item strong, .llm-report-content, dialog input, dialog select, dialog textarea {
   font-size: calc(12 * var(--ui-font-unit));
 }
-.topbar time, .intro-copy, .topology-inspector header strong, .horizon-values strong,
+.topbar time, .topology-inspector header strong, .horizon-values strong,
 .device-icon { font-size: calc(13 * var(--ui-font-unit)); }
 .metric-top strong { font-size: calc(14 * var(--ui-font-unit)); }
