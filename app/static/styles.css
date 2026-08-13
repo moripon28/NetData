@@ -139,7 +139,7 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 .health-wrap { display: grid; place-items: center; padding: 24px 20px 17px; border-bottom: 1px solid var(--line); }
 .command-rail .health-wrap { padding: 13px 8px; border-right: 1px solid var(--line); border-bottom: 0; }
 .command-rail .health-orbit { width: 116px; height: 116px; }
-.command-rail .health-ring { width: 132px; height: 132px; }
+.command-rail .health-ring { width: 100px; height: 100px; }
 .command-rail .health-value strong { font-size: 36px; }
 .command-rail .health-message { max-width: 130px; text-align: center; font-size: 8px; line-height: 1.45; }
 .command-rail .vital-list { padding: 0 15px; }
