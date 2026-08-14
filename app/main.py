@@ -45,9 +45,14 @@ class AgentHeartbeat(BaseModel):
     memory_percent: float = Field(ge=0, le=100)
     disk_percent: float = Field(ge=0, le=100)
     temperature_c: float | None = Field(default=None, ge=-50, le=200)
+    load_1m: float | None = Field(default=None, ge=0)
+    process_count: int | None = Field(default=None, ge=0)
     uptime_seconds: int = Field(ge=0)
     rx_bps: float = Field(default=0, ge=0)
     tx_bps: float = Field(default=0, ge=0)
+    socket_count: int | None = Field(default=None, ge=0)
+    established_socket_count: int | None = Field(default=None, ge=0)
+    listening_socket_count: int | None = Field(default=None, ge=0)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 

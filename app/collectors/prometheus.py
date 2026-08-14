@@ -201,6 +201,10 @@ class PrometheusExporterCollector:
         tx_total = self._sum_interfaces(metrics, "node_network_transmit_bytes_total", ("device",))
         temperature = self._temperature(metrics, ("node_hwmon_temp_celsius", "node_thermal_zone_temp"))
         boot_time = self._first_value(metrics, "node_boot_time_seconds")
+        socket_count = self._first_optional_value(metrics, "node_sockstat_sockets_used")
+        established_socket_count = self._first_optional_value(metrics, "node_netstat_Tcp_CurrEstab")
+        load_1m = self._first_optional_value(metrics, "node_load1")
+        process_count = self._first_optional_value(metrics, "node_processes_total")
         return self._payload(
             target=target,
             hostname=info.get("nodename") or target.name,
@@ -213,8 +217,12 @@ class PrometheusExporterCollector:
             disk_percent=disk_percent,
             temperature_c=temperature,
             uptime_seconds=max(0, int(time.time() - boot_time)) if boot_time else 0,
+            load_1m=load_1m,
+            process_count=process_count,
             rx_total=rx_total,
             tx_total=tx_total,
+            socket_count=socket_count,
+            established_socket_count=established_socket_count,
         )
 
     def _normalize_windows(
@@ -240,6 +248,7 @@ class PrometheusExporterCollector:
         tx_total = self._sum_interfaces(metrics, "windows_net_bytes_sent_total", ("nic", "name"))
         temperature = self._temperature(metrics, ("windows_thermalzone_temperature_celsius",))
         uptime = self._first_value(metrics, "windows_system_system_up_time")
+        process_count = self._first_optional_value(metrics, "windows_system_processes")
         hostname = computer.get("hostname") or info.get("hostname") or target.name
         return self._payload(
             target=target,
@@ -253,8 +262,12 @@ class PrometheusExporterCollector:
             disk_percent=disk_percent,
             temperature_c=temperature,
             uptime_seconds=max(0, int(uptime or 0)),
+            load_1m=None,
+            process_count=process_count,
             rx_total=rx_total,
             tx_total=tx_total,
+            socket_count=None,
+            established_socket_count=None,
         )
 
     def _payload(
@@ -271,8 +284,12 @@ class PrometheusExporterCollector:
         disk_percent: float,
         temperature_c: float | None,
         uptime_seconds: int,
+        load_1m: float | None,
+        process_count: float | None,
         rx_total: float,
         tx_total: float,
+        socket_count: float | None,
+        established_socket_count: float | None,
     ) -> dict[str, Any]:
         now = time.monotonic()
         rx_bps = tx_bps = 0.0
@@ -292,9 +309,16 @@ class PrometheusExporterCollector:
             "memory_percent": round(memory_percent, 1),
             "disk_percent": round(disk_percent, 1),
             "temperature_c": round(temperature_c, 1) if temperature_c is not None else None,
+            "load_1m": round(load_1m, 2) if load_1m is not None else None,
+            "process_count": max(0, int(process_count)) if process_count is not None else None,
             "uptime_seconds": uptime_seconds,
             "rx_bps": round(rx_bps, 1),
             "tx_bps": round(tx_bps, 1),
+            "socket_count": max(0, int(socket_count)) if socket_count is not None else None,
+            "established_socket_count": (
+                max(0, int(established_socket_count)) if established_socket_count is not None else None
+            ),
+            "listening_socket_count": None,
             "metadata": {
                 "collection_method": "prometheus",
                 "exporter_kind": kind,
@@ -324,6 +348,13 @@ class PrometheusExporterCollector:
     def _first_value(metrics: dict[str, list[tuple[dict[str, str], float]]], name: str) -> float:
         values = metrics.get(name, [])
         return float(values[0][1]) if values else 0.0
+
+    @staticmethod
+    def _first_optional_value(
+        metrics: dict[str, list[tuple[dict[str, str], float]]], name: str
+    ) -> float | None:
+        values = metrics.get(name, [])
+        return float(values[0][1]) if values else None
 
     @classmethod
     def _first_available_value(

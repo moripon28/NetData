@@ -19,7 +19,7 @@ from typing import Any
 import psutil
 
 
-VERSION = "0.1.0"
+VERSION = "0.3.0"
 
 
 def stable_node_id() -> str:
@@ -45,6 +45,26 @@ def temperature() -> float | None:
     return None
 
 
+def socket_counts() -> dict[str, int | None]:
+    try:
+        connections = psutil.net_connections(kind="inet")
+    except (OSError, psutil.Error):
+        return {
+            "socket_count": None,
+            "established_socket_count": None,
+            "listening_socket_count": None,
+        }
+    return {
+        "socket_count": len(connections),
+        "established_socket_count": sum(
+            connection.status == psutil.CONN_ESTABLISHED for connection in connections
+        ),
+        "listening_socket_count": sum(
+            connection.status == psutil.CONN_LISTEN for connection in connections
+        ),
+    }
+
+
 class Agent:
     def __init__(self, server: str, token: str, interval: int, verify_tls: bool = True) -> None:
         self.endpoint = server.rstrip("/") + "/api/v1/agent/heartbeat"
@@ -65,6 +85,15 @@ class Agent:
         self._previous_network = (now, counters.bytes_recv, counters.bytes_sent)
         root = Path.home().anchor or "/"
         disk = psutil.disk_usage(root)
+        sockets = socket_counts()
+        try:
+            load_1m: float | None = round(float(psutil.getloadavg()[0]), 2)
+        except (AttributeError, OSError):
+            load_1m = None
+        try:
+            process_count: int | None = len(psutil.pids())
+        except (OSError, psutil.Error):
+            process_count = None
         return {
             "node_id": self.node_id,
             "hostname": socket.gethostname(),
@@ -75,9 +104,12 @@ class Agent:
             "memory_percent": round(psutil.virtual_memory().percent, 1),
             "disk_percent": round(disk.percent, 1),
             "temperature_c": temperature(),
+            "load_1m": load_1m,
+            "process_count": process_count,
             "uptime_seconds": max(0, int(time.time() - psutil.boot_time())),
             "rx_bps": round(rx_bps, 1),
             "tx_bps": round(tx_bps, 1),
+            **sockets,
             "metadata": {"architecture": platform.machine(), "python": platform.python_version()},
         }
 

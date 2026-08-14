@@ -17,7 +17,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=20260813-topology-declutter2">
+  <link rel="stylesheet" href="/static/styles.css?v=20260815-webgl-depth1">
 </head>
 <body>
   <div class="ambient ambient-a" aria-hidden="true"></div>
@@ -53,17 +53,31 @@
     <section class="command-deck" aria-label="ネットワーク概要">
       <article class="panel topology-panel">
         <header class="panel-head">
-          <div><span class="panel-index">01</span><h2>NETWORK CONSTELLATION</h2></div>
+          <div><span class="panel-index">01</span><h2>NETWORK CONSTELLATION</h2><span class="panel-kicker">RAW WEBGL · SPATIAL TELEMETRY</span></div>
           <div class="topology-head-status"><span class="render-mode" id="topologyRenderMode">WEBGL · STARTING</span><span class="subnet-label" id="subnetLabel">SUBNET · DETECTING</span></div>
         </header>
         <div class="topology-stage" id="topologyStage">
+          <div class="topology-volume" aria-hidden="true"><i></i><i></i><i></i></div>
           <canvas id="topologyCanvas" aria-label="3Dネットワーク端末接続図"></canvas>
           <div class="topology-reticle" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
           <div class="topology-label-layer" id="topologyLabelLayer" aria-label="ネットワークノード"></div>
           <div class="topology-scene-meta">
-            <span>CLIENT RENDERED</span>
+            <span>LIVE SPATIAL FIELD // CLIENT RENDERED</span>
             <b id="topologyNodeCount">0 NODES</b>
+            <div class="topology-readouts">
+              <span><small>TRAFFIC FLUX</small><b id="topologyTrafficFlux">0 bps</b></span>
+              <span><small>SOCKETS</small><b id="topologySocketCount">—</b></span>
+              <span><small>PROCESSES</small><b id="topologyProcessCount">—</b></span>
+              <span><small>GATEWAY RTT</small><b id="topologyLatencyReadout">—</b></span>
+            </div>
           </div>
+          <div class="topology-camera-hud" aria-hidden="true">
+            <span><b id="topologyFrameRate">— FPS</b><small id="topologyObjectCount">0 OBJECTS</small></span>
+            <span><b>DRAG</b><small>ORBIT CAMERA</small></span>
+            <span><b>SCROLL</b><small>DEPTH ZOOM</small></span>
+            <span><b>DOUBLE CLICK</b><small>RESET VIEW</small></span>
+          </div>
+          <div class="topology-depth-rail" aria-hidden="true"><span>NEAR</span><i></i><i></i><i></i><i></i><i></i><span>FAR</span></div>
           <aside class="llm-flavor-stream" id="llmFlavorStream" aria-hidden="true">
             <header><span>LOCAL LLM // ECHO BUFFER</span><b id="llmFlavorScope">LAST 3 REPORTS</b></header>
             <div class="llm-flavor-viewport" id="llmFlavorViewport">
@@ -286,7 +300,7 @@
     </form>
   </dialog>
 
-  <script src="/static/topology3d.js?v=20260813-topology-declutter2" defer></script>
-  <script src="/static/app.js?v=20260813-topology-declutter2" defer></script>
+  <script src="/static/topology3d.js?v=20260815-webgl-depth1" defer></script>
+  <script src="/static/app.js?v=20260815-webgl-depth1" defer></script>
 </body>
 </html>

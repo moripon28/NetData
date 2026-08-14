@@ -38,6 +38,39 @@ async def test_database_adds_system_prompt_to_existing_llm_settings(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_database_adds_socket_counts_to_existing_agent_nodes(tmp_path):
+    path = tmp_path / "legacy-agents.db"
+    connection = sqlite3.connect(path)
+    connection.execute(
+        """
+        CREATE TABLE agent_nodes (
+            node_id TEXT PRIMARY KEY, hostname TEXT NOT NULL, os_name TEXT NOT NULL,
+            os_version TEXT NOT NULL DEFAULT '', source_ip TEXT NOT NULL,
+            agent_version TEXT NOT NULL DEFAULT '', cpu_percent REAL NOT NULL,
+            memory_percent REAL NOT NULL, disk_percent REAL NOT NULL, temperature_c REAL,
+            uptime_seconds INTEGER NOT NULL, rx_bps REAL NOT NULL DEFAULT 0,
+            tx_bps REAL NOT NULL DEFAULT 0, last_seen REAL NOT NULL,
+            metadata TEXT NOT NULL DEFAULT '{}'
+        )
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    database = Database(path)
+    await database.connect()
+    try:
+        cursor = await database._db().execute("PRAGMA table_info(agent_nodes)")
+        columns = {row["name"] for row in await cursor.fetchall()}
+        assert {
+            "load_1m", "process_count", "socket_count",
+            "established_socket_count", "listening_socket_count",
+        } <= columns
+    finally:
+        await database.close()
+
+
+@pytest.mark.asyncio
 async def test_database_round_trip(tmp_path):
     database = Database(tmp_path / "test.db")
     await database.connect()
@@ -84,11 +117,15 @@ async def test_database_round_trip(tmp_path):
             {
                 "node_id": "node-test", "hostname": "test-host", "os_name": "Linux", "cpu_percent": 12,
                 "memory_percent": 34, "disk_percent": 56, "uptime_seconds": 1000,
+                "load_1m": 0.42, "process_count": 123,
                 "rx_bps": 2048, "tx_bps": 256,
+                "socket_count": 21, "established_socket_count": 4, "listening_socket_count": 3,
             },
             "192.168.10.50",
         )
         assert (await database.agents())[0]["status"] == "online"
+        assert (await database.agents())[0]["socket_count"] == 21
+        assert (await database.agents())[0]["process_count"] == 123
         traffic_history = await database.host_traffic_history(1, ["node-test"])
         assert traffic_history[-1]["source_type"] == "agent"
         assert traffic_history[-1]["rx_bps"] == 2048

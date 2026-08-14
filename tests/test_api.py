@@ -27,7 +27,10 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert index.status_code == 200
         assert "NETPULSE" in index.text
         assert "EASY SETUP" in index.text
-        assert 'src="/static/topology3d.js?v=20260813-topology-declutter2"' in index.text
+        assert "RAW WEBGL" in index.text
+        assert "SPATIAL TELEMETRY" in index.text
+        assert 'src="/static/topology3d.js?v=20260815-webgl-depth1"' in index.text
+        assert 'src="/static/app.js?v=20260815-webgl-depth1"' in index.text
         assert 'data-font-size="small"' in index.text
         assert 'data-font-size="medium"' in index.text
         assert 'data-font-size="large"' in index.text
@@ -38,27 +41,41 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'id="llmFlavorStream"' in index.text
         assert 'id="llmFlavorScope"' in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
-        assert '/static/styles.css?v=20260813-topology-declutter2' in index.text
-        assert '/static/app.js?v=20260813-topology-declutter2' in index.text
+        assert '/static/styles.css?v=20260815-webgl-depth1' in index.text
+        assert '/static/app.js?v=20260815-webgl-depth1' in index.text
 
         topology_script = client.get("/static/topology3d.js")
         assert topology_script.status_code == 200
         assert "NetPulseTopology3D" in topology_script.text
         assert "findLabelPlacement" in topology_script.text
         assert "reservedLabelRects" in topology_script.text
+        assert "collidesWithCard" in topology_script.text
+        assert "createSphereMesh" in topology_script.text
+        assert "meshVertex" in topology_script.text
+        assert "gl.DEPTH_TEST" in topology_script.text
+        assert "drawMesh" in topology_script.text
+        assert "gl.POINTS" in topology_script.text
+        assert "updateLabelLeader" in topology_script.text
 
         app_script = client.get("/static/app.js")
         assert app_script.status_code == 200
         assert "offlineGroupMinimum = 4" in app_script.text
         assert "INACTIVE DEVICES ×" in app_script.text
+        assert "topologySocketCount" in app_script.text
+        assert "liveSocketNodes" in app_script.text
+        assert 'role === "agent" ? "AGENT" : "PROM"' in app_script.text
 
         styles = client.get("/static/styles.css")
         assert styles.status_code == 200
         assert ".command-rail .health-orbit { width: 116px; height: 116px; }" in styles.text
         assert ".command-rail .health-ring { width: 100px; height: 100px; }" in styles.text
-        assert "min-width: calc(96 * var(--ui-font-unit))" in styles.text
-        assert "max-width: calc(150 * var(--ui-font-unit))" in styles.text
+        assert "min-width: calc(112 * var(--ui-font-unit))" in styles.text
+        assert "max-width: calc(180 * var(--ui-font-unit))" in styles.text
         assert ".topology-node-label.selected .node-label-metrics { display: flex; }" in styles.text
+        assert ".node-label-glance" in styles.text
+        assert ".topology-volume" in styles.text
+        assert ".topology-depth-rail" in styles.text
+        assert "--leader-length" in styles.text
 
         metrics = client.get("/metrics")
         assert metrics.status_code == 200
@@ -111,6 +128,8 @@ def test_demo_mode_produces_devices(tmp_path):
         payload = client.get("/api/v1/snapshot").json()
         assert payload["summary"]["online_devices"] == 6
         assert payload["network"]["rx_bps"] > 0
+        assert payload["system"]["socket_count"] == 86
+        assert payload["system"]["process_count"] == 147
         assert len(payload["devices"]) == 6
 
 
@@ -123,7 +142,9 @@ def test_signed_agent_heartbeat(tmp_path):
     payload = {
         "node_id": "node-1234", "hostname": "workstation", "os_name": "Windows",
         "cpu_percent": 12.5, "memory_percent": 45.0, "disk_percent": 60.0,
+        "load_1m": 0.78, "process_count": 214,
         "uptime_seconds": 86400, "rx_bps": 512.0, "tx_bps": 128.0,
+        "socket_count": 42, "established_socket_count": 9, "listening_socket_count": 5,
     }
     body = json.dumps(payload, separators=(",", ":")).encode()
     timestamp = str(int(time.time()))
@@ -138,12 +159,16 @@ def test_signed_agent_heartbeat(tmp_path):
         agents = client.get("/api/v1/agents").json()
         assert agents["online"] == 1
         assert agents["items"][0]["hostname"] == "workstation"
+        assert agents["items"][0]["socket_count"] == 42
+        assert agents["items"][0]["process_count"] == 214
         app.state.monitor.latest["generated_at"] = time.time()
         app.state.monitor.latest["network"].update(
             {"interface": "eth0", "ip_address": "192.168.10.201", "rx_bps": 1024.0, "tx_bps": 256.0}
         )
         snapshot = client.get("/api/v1/snapshot").json()
         assert snapshot["agents"]["items"][0]["cpu_percent"] == 12.5
+        assert snapshot["agents"]["items"][0]["established_socket_count"] == 9
+        assert snapshot["agents"]["items"][0]["load_1m"] == 0.78
         assert snapshot["traffic"]["source_count"] == 2
         assert snapshot["traffic"]["total"]["rx_bps"] == 1536.0
         assert {item["id"] for item in snapshot["traffic"]["sources"]} == {"local", "agent:node-1234"}

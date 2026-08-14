@@ -91,9 +91,14 @@ class Database:
                 memory_percent REAL NOT NULL,
                 disk_percent REAL NOT NULL,
                 temperature_c REAL,
+                load_1m REAL,
+                process_count INTEGER,
                 uptime_seconds INTEGER NOT NULL,
                 rx_bps REAL NOT NULL DEFAULT 0,
                 tx_bps REAL NOT NULL DEFAULT 0,
+                socket_count INTEGER,
+                established_socket_count INTEGER,
+                listening_socket_count INTEGER,
                 last_seen REAL NOT NULL,
                 metadata TEXT NOT NULL DEFAULT '{}'
             );
@@ -167,6 +172,20 @@ class Database:
             await self._connection.execute(
                 "ALTER TABLE llm_settings ADD COLUMN flavor_scope TEXT NOT NULL DEFAULT 'last_3'"
             )
+        agent_columns = {
+            row["name"]
+            for row in await (await self._connection.execute("PRAGMA table_info(agent_nodes)")).fetchall()
+        }
+        agent_migrations = {
+            "load_1m": "REAL",
+            "process_count": "INTEGER",
+            "socket_count": "INTEGER",
+            "established_socket_count": "INTEGER",
+            "listening_socket_count": "INTEGER",
+        }
+        for column, column_type in agent_migrations.items():
+            if column not in agent_columns:
+                await self._connection.execute(f"ALTER TABLE agent_nodes ADD COLUMN {column} {column_type}")
         await self._connection.commit()
 
     async def close(self) -> None:
@@ -418,22 +437,29 @@ class Database:
                 """
                 INSERT INTO agent_nodes (
                     node_id, hostname, os_name, os_version, source_ip, agent_version, cpu_percent,
-                    memory_percent, disk_percent, temperature_c, uptime_seconds, rx_bps, tx_bps,
-                    last_seen, metadata
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    memory_percent, disk_percent, temperature_c, load_1m, process_count, uptime_seconds, rx_bps, tx_bps,
+                    socket_count, established_socket_count, listening_socket_count, last_seen, metadata
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(node_id) DO UPDATE SET
                     hostname=excluded.hostname, os_name=excluded.os_name, os_version=excluded.os_version,
                     source_ip=excluded.source_ip, agent_version=excluded.agent_version,
                     cpu_percent=excluded.cpu_percent, memory_percent=excluded.memory_percent,
                     disk_percent=excluded.disk_percent, temperature_c=excluded.temperature_c,
+                    load_1m=excluded.load_1m, process_count=excluded.process_count,
                     uptime_seconds=excluded.uptime_seconds, rx_bps=excluded.rx_bps,
-                    tx_bps=excluded.tx_bps, last_seen=excluded.last_seen, metadata=excluded.metadata
+                    tx_bps=excluded.tx_bps, socket_count=excluded.socket_count,
+                    established_socket_count=excluded.established_socket_count,
+                    listening_socket_count=excluded.listening_socket_count,
+                    last_seen=excluded.last_seen, metadata=excluded.metadata
                 """,
                 (
                     payload["node_id"], payload["hostname"], payload["os_name"], payload.get("os_version", ""),
                     source_ip, payload.get("agent_version", ""), payload["cpu_percent"],
                     payload["memory_percent"], payload["disk_percent"], payload.get("temperature_c"),
-                    payload["uptime_seconds"], payload.get("rx_bps", 0), payload.get("tx_bps", 0), now,
+                    payload.get("load_1m"), payload.get("process_count"),
+                    payload["uptime_seconds"], payload.get("rx_bps", 0), payload.get("tx_bps", 0),
+                    payload.get("socket_count"), payload.get("established_socket_count"),
+                    payload.get("listening_socket_count"), now,
                     json.dumps(metadata, ensure_ascii=False),
                 ),
             )

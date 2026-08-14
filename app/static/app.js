@@ -21,6 +21,9 @@
     topologyNodeSubtitle: $("topologyNodeSubtitle"), topologyNodeState: $("topologyNodeState"),
     topologyNodeMetrics: $("topologyNodeMetrics"), topologyNodeDescription: $("topologyNodeDescription"),
     topologyProfileButton: $("topologyProfileButton"),
+    topologyTrafficFlux: $("topologyTrafficFlux"), topologySocketCount: $("topologySocketCount"),
+    topologyProcessCount: $("topologyProcessCount"), topologyLatencyReadout: $("topologyLatencyReadout"),
+    topologyFrameRate: $("topologyFrameRate"), topologyObjectCount: $("topologyObjectCount"),
     llmFlavorStream: $("llmFlavorStream"), llmFlavorScope: $("llmFlavorScope"),
     llmFlavorViewport: $("llmFlavorViewport"), llmFlavorContent: $("llmFlavorContent"),
     llmFlavorCursor: $("llmFlavorCursor"), llmFlavorStatus: $("llmFlavorStatus"),
@@ -506,7 +509,8 @@
     elements.agentCount.className = `mini-status ${(agents.online || 0) > 0 ? "online" : agents.configured ? "checking" : "disabled"}`;
     if (agents.items?.length) {
       elements.agentNodes.innerHTML = agents.items.slice(0, 4).map((agent) => `<span class="agent-node ${agent.status === "online" ? "" : "offline"}"><i></i>${escapeHtml(agent.hostname)} · ${Number(agent.cpu_percent || 0).toFixed(0)}%</span>`).join("");
-      elements.agentDetail.textContent = `${agents.online}台がオンライン。CPU・メモリ・ディスクを受信中です。`;
+      const measuredSockets = agents.items.filter((agent) => agent.status === "online" && finiteNumber(agent.socket_count) != null).reduce((total, agent) => total + Number(agent.socket_count), 0);
+      elements.agentDetail.textContent = `${agents.online}台がオンライン。CPU・メモリ・ディスク${measuredSockets ? `・${measuredSockets}ソケット` : ""}を受信中です。`;
     } else {
       elements.agentNodes.innerHTML = '<span class="agent-empty">Windows/Linuxエージェントを待っています。</span>';
       elements.agentDetail.textContent = agents.configured ? "登録トークンは準備済みです。" : "サーバー側の登録トークンが未設定です。";
@@ -540,6 +544,14 @@
     return "online";
   }
 
+  function topologyActivity(node) {
+    if (topologyStatusClass(node.status) === "offline") return 0.03;
+    const traffic = clamp(Math.log10(Math.max(0, Number(node.rxBps) || 0) + Math.max(0, Number(node.txBps) || 0) + 1) / 7, 0, 1);
+    const cpu = clamp((finiteNumber(node.cpuPercent) || 0) / 100, 0, 1);
+    const sockets = clamp(Math.log10(Math.max(0, finiteNumber(node.socketCount) || 0) + 1) / 2.5, 0, 1);
+    return clamp(0.08 + traffic * 0.55 + cpu * 0.22 + sockets * 0.15, 0.08, 1);
+  }
+
   function renderTopologyInspector(node) {
     if (!node) return;
     state.selectedTopologyNode = node;
@@ -550,7 +562,7 @@
     elements.topologyNodeState.className = `node-state ${statusClass}`;
     elements.topologyNodeState.textContent = String(node.status || "unknown").toUpperCase();
     elements.topologyNodeMetrics.replaceChildren();
-    (node.metrics?.length ? node.metrics : [metric("STATUS", String(node.status || "unknown").toUpperCase())]).slice(0, 6).forEach((item) => {
+    (node.metrics?.length ? node.metrics : [metric("STATUS", String(node.status || "unknown").toUpperCase())]).slice(0, 9).forEach((item) => {
       const wrapper = document.createElement("span");
       const label = document.createElement("small");
       const value = document.createElement("b");
@@ -559,7 +571,7 @@
       wrapper.append(label, value);
       elements.topologyNodeMetrics.append(wrapper);
     });
-    elements.topologyNodeDescription.textContent = node.description || "このノードから取得できる監視値を表示しています。";
+    elements.topologyNodeDescription.textContent = `${node.description || "このノードから取得できる監視値を表示しています。"}${node.linkType && node.role !== "core" ? ` 観測経路: ${node.linkType}。` : ""}`;
     elements.topologyProfileButton.hidden = node.kind !== "device" || !node.ip;
   }
 
@@ -576,12 +588,19 @@
     nodes.push({
       id: "core:rp5", role: "core", kind: "system", status: coreStatus,
       title: "RP5 OBSERVER", subtitle: `${String(network.interface || "LOCAL NODE").toUpperCase()} · ${summary.subnet || "SUBNET DETECTING"}`,
+      linkType: "LOCAL", socketCount: finiteNumber(system.socket_count), cpuPercent: finiteNumber(system.cpu_percent),
+      rxBps: finiteNumber(network.rx_bps) || 0, txBps: finiteNumber(network.tx_bps) || 0,
       metrics: compactMetrics(
         percentMetric("CPU", system.cpu_percent), percentMetric("MEM", system.memory_percent),
         percentMetric("DISK", system.disk_percent), temperatureMetric("TEMP", system.temperature_c),
         metric("RX", formatRate(network.rx_bps)), metric("TX", formatRate(network.tx_bps)),
+        metric("LOAD 1M", finiteNumber(system.load_1m) == null ? "—" : Number(system.load_1m).toFixed(2)),
+        metric("PROCESSES", finiteNumber(system.process_count) == null ? "—" : String(system.process_count)),
+        metric("SOCKETS", finiteNumber(system.socket_count) == null ? "—" : String(system.socket_count)),
+        metric("ESTAB", finiteNumber(system.established_socket_count) == null ? "—" : String(system.established_socket_count)),
+        metric("LISTEN", finiteNumber(system.listening_socket_count) == null ? "—" : String(system.listening_socket_count)),
       ),
-      description: "NetPulseを実行するRaspberry Pi 5です。主要なシステム負荷と、この監視ノード自身のNIC通信量を表示しています。",
+      description: "NetPulseを実行するRaspberry Pi 5です。システム負荷、プロセス数、この監視ノード自身のNIC通信量、INETソケット集計を表示しています。",
     });
 
     if (network.gateway) {
@@ -591,6 +610,7 @@
       nodes.push({
         id: `gateway:${network.gateway}`, role: "gateway", kind: "gateway", status: gatewayOnline ? "online" : "offline",
         title: "NETWORK GATEWAY", subtitle: network.gateway,
+        linkType: Object.keys(snmpMetrics).length ? "SNMP" : "ICMP", rxBps: finiteNumber(snmpMetrics.wan_rx_bps) || 0, txBps: finiteNumber(snmpMetrics.wan_tx_bps) || 0,
         metrics: compactMetrics(
           metric("LATENCY", network.gateway_latency_ms == null ? "NO RESPONSE" : `${Number(network.gateway_latency_ms).toFixed(1)} ms`),
           metric("LOSS", `${Number(network.packet_loss_percent || 0).toFixed(1)}%`),
@@ -613,6 +633,7 @@
       nodes.push({
         id: `qnap:${qnap.target || index}`, role: "qnap", kind: "qnap", status: warnings ? "degraded" : (qnap.status || "online"),
         title: identity.hostname || identity.model || "QNAP NAS", subtitle: [identity.model, qnap.target].filter(Boolean).join(" · "),
+        linkType: "SNMP", rxBps: 0, txBps: 0, cpuPercent: finiteNumber(qnapSystem.cpu_percent),
         metrics: compactMetrics(
           percentMetric("CPU", qnapSystem.cpu_percent), percentMetric("MEM", memoryPercent),
           temperatureMetric("CPU TEMP", qnapSystem.cpu_temperature_celsius),
@@ -630,12 +651,19 @@
         id: `${role}:${host.node_id || host.hostname || index}`, role, kind: "host", status: host.status || "unknown",
         title: host.hostname || host.node_id || role.toUpperCase(),
         subtitle: [host.os_name, ip].filter(Boolean).join(" · "),
+        linkType: role === "agent" ? "AGENT" : "PROM", cpuPercent: finiteNumber(host.cpu_percent),
+        socketCount: finiteNumber(host.socket_count), rxBps: finiteNumber(host.rx_bps) || 0, txBps: finiteNumber(host.tx_bps) || 0,
         metrics: compactMetrics(
           percentMetric("CPU", host.cpu_percent), percentMetric("MEM", host.memory_percent),
           percentMetric("DISK", host.disk_percent), temperatureMetric("TEMP", host.temperature_c),
           metric("RX", formatRate(host.rx_bps)), metric("TX", formatRate(host.tx_bps)),
+          metric("LOAD 1M", finiteNumber(host.load_1m) == null ? null : Number(host.load_1m).toFixed(2)),
+          metric("PROCESSES", finiteNumber(host.process_count) == null ? null : String(host.process_count)),
+          metric("SOCKETS", finiteNumber(host.socket_count) == null ? "—" : String(host.socket_count)),
+          metric("ESTAB", finiteNumber(host.established_socket_count) == null ? "—" : String(host.established_socket_count)),
+          metric("LISTEN", finiteNumber(host.listening_socket_count) == null ? "—" : String(host.listening_socket_count)),
         ),
-        description: role === "agent" ? "署名付きホストエージェントから受信した内部メトリクスです。" : "Prometheus Exporterから取得したホストメトリクスです。",
+        description: role === "agent" ? "署名付きホストエージェントから受信した負荷・プロセス数・INETソケットなどの集計です。接続先アドレスや通信内容は収集しません。" : "Prometheus Exporterから取得したホストメトリクスです。Exporterが公開している場合だけ負荷・プロセス数・ソケット集計を表示します。",
       });
     };
     (snapshot.agents?.items || []).slice(0, 6).forEach((host, index) => appendHostNode(host, "agent", index));
@@ -664,6 +692,7 @@
       nodes.push({
         id: `device:${device.ip}`, role: "device", kind: "device", status: device.status || "unknown", ip: device.ip,
         title: device.display_name || device.hostname || device.ip, subtitle: `${String(device.device_type || "unknown").toUpperCase()} · ${device.ip}`,
+        linkType: "DISCOVERY", rxBps: 0, txBps: 0,
         metrics: compactMetrics(
           metric("LATENCY", device.latency_ms == null ? "—" : `${Number(device.latency_ms).toFixed(1)} ms`),
           metric("SEEN", relativeTime(device.last_seen)), metric("TRUST", device.is_trusted ? "TRUSTED" : "UNSET"),
@@ -683,6 +712,7 @@
         id: "group:inactive-devices", role: "device-group", kind: "device-group", status: "offline",
         title: `INACTIVE DEVICES ×${inactiveCandidates.length}`,
         subtitle: "OFFLINE · UNREACHABLE · UNKNOWN",
+        linkType: "DISCOVERY", rxBps: 0, txBps: 0,
         metrics: compactMetrics(
           metric("COUNT", String(inactiveCandidates.length)),
           metric("OFFLINE", String(statusCounts.offline || 0)),
@@ -693,12 +723,22 @@
       });
     }
 
-    state.topologyNodes = nodes;
-    const liveCount = nodes.filter((node) => topologyStatusClass(node.status) === "online").length;
-    const totalCount = nodes.reduce((total, node) => total + Math.max(1, Number(node.groupCount) || 1), 0);
-    const groupedCount = nodes.reduce((total, node) => total + (Number(node.groupCount) || 0), 0);
-    elements.topologyNodeCount.textContent = `${liveCount} LIVE / ${totalCount} NODES${groupedCount ? ` · ${groupedCount} GROUPED` : ""}`;
-    state.topologyScene?.setNodes(nodes);
+    const activeNodes = nodes.map((node) => ({ ...node, activityLevel: topologyActivity(node) }));
+    state.topologyNodes = activeNodes;
+    const liveCount = activeNodes.filter((node) => topologyStatusClass(node.status) === "online").length;
+    const totalCount = activeNodes.reduce((total, node) => total + Math.max(1, Number(node.groupCount) || 1), 0);
+    const groupedCount = activeNodes.reduce((total, node) => total + (Number(node.groupCount) || 0), 0);
+    const liveSocketNodes = activeNodes.filter((node) => topologyStatusClass(node.status) === "online" && finiteNumber(node.socketCount) != null);
+    const socketCount = liveSocketNodes.reduce((total, node) => total + Number(node.socketCount), 0);
+    const processCount = Math.max(0, Number(system.process_count) || 0) + [...(snapshot.agents?.items || []), ...(snapshot.exporters?.nodes || [])].filter((host) => host.status === "online").reduce((total, host) => total + Math.max(0, Number(host.process_count) || 0), 0);
+    const aggregateTraffic = snapshot.traffic?.total || {};
+    const currentRate = Math.max(0, Number(aggregateTraffic.rx_bps) || 0) + Math.max(0, Number(aggregateTraffic.tx_bps) || 0);
+    elements.topologyNodeCount.textContent = `${liveCount} LIVE / ${totalCount} NODES · ${Math.max(0, activeNodes.length - 1)} LINKS${groupedCount ? ` · ${groupedCount} GROUPED` : ""}`;
+    elements.topologyTrafficFlux.textContent = formatRate(currentRate);
+    elements.topologySocketCount.textContent = liveSocketNodes.length ? String(socketCount) : "—";
+    elements.topologyProcessCount.textContent = processCount ? String(processCount) : "—";
+    elements.topologyLatencyReadout.textContent = network.gateway_latency_ms == null ? "—" : `${Number(network.gateway_latency_ms).toFixed(1)} ms`;
+    state.topologyScene?.setNodes(activeNodes);
   }
 
   function sizeCanvas(canvas) {
@@ -898,7 +938,11 @@
     onModeChange: (mode) => {
       const fallback = mode !== "webgl";
       elements.topologyRenderMode.className = `render-mode${fallback ? " fallback" : ""}`;
-      elements.topologyRenderMode.textContent = fallback ? "2D · SAFE MODE" : "WEBGL · ACTIVE";
+      elements.topologyRenderMode.textContent = fallback ? "2D · SAFE MODE" : "WEBGL 3D · ACTIVE";
+    },
+    onFrameStats: ({ fps, objects }) => {
+      elements.topologyFrameRate.textContent = `${fps} FPS`;
+      elements.topologyObjectCount.textContent = `${objects} OBJECTS`;
     },
   }) || null;
   if (!state.topologyScene) {

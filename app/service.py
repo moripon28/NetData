@@ -190,7 +190,8 @@ class MonitorService:
                 key: sample.get(key)
                 for key in (
                     "cpu_percent", "memory_percent", "memory_used", "memory_total", "disk_percent",
-                    "disk_used", "disk_total", "temperature_c", "load_1m", "load_5m", "uptime_seconds",
+                    "disk_used", "disk_total", "temperature_c", "load_1m", "load_5m", "process_count", "uptime_seconds",
+                    "socket_count", "established_socket_count", "listening_socket_count",
                 )
             },
             "network": {
@@ -689,7 +690,8 @@ class MonitorService:
             "memory_percent": round(42 + math.sin(tick / 9) * 5, 1), "memory_used": 3_600_000_000,
             "memory_total": 8_000_000_000, "disk_percent": 38.4, "disk_used": 48_000_000_000,
             "disk_total": 128_000_000_000, "temperature_c": round(49 + wave * 3, 1),
-            "load_1m": 0.62, "load_5m": 0.55, "uptime_seconds": 483_920,
+            "load_1m": 0.62, "load_5m": 0.55, "process_count": 147, "uptime_seconds": 483_920,
+            "socket_count": 86, "established_socket_count": 18, "listening_socket_count": 12,
             "interface": "eth0", "ip_address": "192.168.10.201", "rx_bps": max(5000, round(2_400_000 + wave * 1_500_000 + random.random() * 850_000)),
             "tx_bps": max(2000, round(420_000 + math.sin(tick / 3) * 300_000 + random.random() * 180_000)),
             "rx_total": 184_000_000_000, "tx_total": 31_000_000_000, "gateway": "192.168.10.1",
@@ -700,7 +702,8 @@ class MonitorService:
     def _empty_snapshot(self) -> dict[str, Any]:
         return {
             "type": "snapshot", "generated_at": time.time(),
-            "system": {"cpu_percent": 0, "memory_percent": 0, "disk_percent": 0, "temperature_c": None},
+            "system": {"cpu_percent": 0, "memory_percent": 0, "disk_percent": 0, "temperature_c": None,
+                       "process_count": None, "socket_count": None, "established_socket_count": None, "listening_socket_count": None},
             "network": {"interface": "detecting", "ip_address": None, "rx_bps": 0, "tx_bps": 0, "gateway": self.gateway, "gateway_latency_ms": None, "packet_loss_percent": 0},
             "summary": {"online_devices": 0, "total_devices": 0, "health_score": 0, "subnet": self.subnet},
             "devices": [], "connectivity": self.connectivity_latest, "snmp": self.snmp_latest,

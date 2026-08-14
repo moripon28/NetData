@@ -16,11 +16,38 @@ from app.collectors.snmp import (
 from app.collectors.system import SystemCollector
 
 
+class FakeConnection:
+    def __init__(self, status):
+        self.status = status
+
+
 def test_system_collector_returns_bounded_percentages():
     sample = SystemCollector().collect()
     assert 0 <= sample["cpu_percent"] <= 100
     assert 0 <= sample["memory_percent"] <= 100
     assert 0 <= sample["disk_percent"] <= 100
+    assert sample["process_count"] is None or sample["process_count"] >= 0
+
+
+def test_system_collector_counts_inet_sockets(monkeypatch):
+    import psutil
+
+    monkeypatch.setattr(
+        psutil,
+        "net_connections",
+        lambda kind: [
+            FakeConnection(psutil.CONN_ESTABLISHED),
+            FakeConnection(psutil.CONN_ESTABLISHED),
+            FakeConnection(psutil.CONN_LISTEN),
+            FakeConnection(psutil.CONN_NONE),
+        ],
+    )
+    counts = SystemCollector()._socket_counts()
+    assert counts == {
+        "socket_count": 4,
+        "established_socket_count": 2,
+        "listening_socket_count": 1,
+    }
 
 
 def test_traffic_collector_returns_non_negative_counters():
@@ -172,7 +199,11 @@ def test_prometheus_node_exporter_metrics_are_normalized(monkeypatch):
         node_network_transmit_bytes_total{device="eth0"} 4000
         node_network_receive_bytes_total{device="lo"} 999999
         node_boot_time_seconds 100
+        node_load1 0.75
+        node_processes_total 122
         node_hwmon_temp_celsius{chip="thermal"} 48.5
+        node_sockstat_sockets_used 75
+        node_netstat_Tcp_CurrEstab 11
         """
     )
     second = parse_prometheus_text(
@@ -187,7 +218,11 @@ def test_prometheus_node_exporter_metrics_are_normalized(monkeypatch):
         node_network_receive_bytes_total{device="eth0"} 12000
         node_network_transmit_bytes_total{device="eth0"} 5000
         node_boot_time_seconds 100
+        node_load1 0.82
+        node_processes_total 128
         node_hwmon_temp_celsius{chip="thermal"} 48.5
+        node_sockstat_sockets_used 79
+        node_netstat_Tcp_CurrEstab 13
         """
     )
     clock = iter((10.0, 12.0))
@@ -200,8 +235,12 @@ def test_prometheus_node_exporter_metrics_are_normalized(monkeypatch):
     assert normalized_second["memory_percent"] == 60.0
     assert normalized_second["disk_percent"] == 75.0
     assert normalized_second["temperature_c"] == 48.5
+    assert normalized_second["load_1m"] == 0.82
+    assert normalized_second["process_count"] == 128
     assert normalized_second["rx_bps"] == 1000.0
     assert normalized_second["tx_bps"] == 500.0
+    assert normalized_second["socket_count"] == 79
+    assert normalized_second["established_socket_count"] == 13
 
 
 def test_prometheus_exporter_targets_reject_credentials_and_queries():
@@ -233,6 +272,7 @@ def test_prometheus_windows_exporter_current_metric_names_are_normalized(monkeyp
         windows_net_bytes_received_total{nic="Ethernet"} 3000
         windows_net_bytes_sent_total{nic="Ethernet"} 2000
         windows_system_system_up_time 3600
+        windows_system_processes 246
         """
     )
     monkeypatch.setattr("app.collectors.prometheus.time.monotonic", lambda: 10.0)
@@ -242,3 +282,5 @@ def test_prometheus_windows_exporter_current_metric_names_are_normalized(monkeyp
     assert normalized["memory_percent"] == 75.0
     assert normalized["disk_percent"] == 75.0
     assert normalized["uptime_seconds"] == 3600
+    assert normalized["process_count"] == 246
+    assert normalized["load_1m"] is None
