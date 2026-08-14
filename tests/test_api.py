@@ -41,8 +41,10 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'id="llmFlavorStream"' in index.text
         assert 'id="llmFlavorScope"' in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
-        assert '/static/styles.css?v=20260815-webgl-depth1' in index.text
+        assert '/static/styles.css?v=20260815-health-center1' in index.text
         assert '/static/app.js?v=20260815-webgl-depth1' in index.text
+        assert '<div class="health-value"><strong id="healthScore">--</strong></div>' in index.text
+        assert "<small>HEALTH</small>" not in index.text
 
         topology_script = client.get("/static/topology3d.js")
         assert topology_script.status_code == 200
@@ -69,6 +71,8 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert styles.status_code == 200
         assert ".command-rail .health-orbit { width: 116px; height: 116px; }" in styles.text
         assert ".command-rail .health-ring { width: 100px; height: 100px; }" in styles.text
+        assert ".command-rail .health-value strong { font-size: 32px; }" in styles.text
+        assert ".health-value { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }" in styles.text
         assert "min-width: calc(112 * var(--ui-font-unit))" in styles.text
         assert "max-width: calc(180 * var(--ui-font-unit))" in styles.text
         assert ".topology-node-label.selected .node-label-metrics { display: flex; }" in styles.text

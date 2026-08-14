@@ -143,7 +143,7 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 .command-rail .health-wrap { padding: 13px 8px; border-right: 1px solid var(--line); border-bottom: 0; }
 .command-rail .health-orbit { width: 116px; height: 116px; }
 .command-rail .health-ring { width: 100px; height: 100px; }
-.command-rail .health-value strong { font-size: 36px; }
+.command-rail .health-value strong { font-size: 32px; }
 .command-rail .health-message { max-width: 130px; text-align: center; font-size: 8px; line-height: 1.45; }
 .command-rail .vital-list { padding: 0 15px; }
 .command-rail .vital-item { height: 38px; }
@@ -155,7 +155,7 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 @keyframes orbit { to { transform: rotate(360deg); } }
 .health-ring { width: 150px; height: 150px; transform: rotate(-90deg); }
 .health-ring circle { fill: none; stroke-width: 7; }.ring-track { stroke: rgba(156,255,206,.09); }.ring-value { stroke: var(--mint); stroke-linecap: round; stroke-dasharray: 414.69; stroke-dashoffset: 414.69; filter: drop-shadow(0 0 6px rgba(156,255,206,.6)); transition: stroke-dashoffset .8s ease, stroke .4s; }
-.health-value { position: absolute; display: grid; justify-items: center; }.health-value strong { font: 300 46px var(--mono); letter-spacing: -.08em; }.health-value small { color: var(--muted); font: 8px var(--mono); letter-spacing: .22em; }
+.health-value { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }.health-value strong { font: 300 46px/1 var(--mono); letter-spacing: -.08em; }
 .health-message { margin: 6px 0 0; min-height: 20px; color: var(--muted); font-size: 11px; }
 .vital-list { padding: 0 22px; }.vital-item { height: 51px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); }.vital-item:last-child { border: 0; }
 .vital-item > span { color: var(--muted); font: 9px var(--mono); letter-spacing: .12em; }.vital-item strong { font: 600 12px var(--mono); }.vital-item strong small { color: var(--muted); }
