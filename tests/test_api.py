@@ -41,7 +41,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'id="llmFlavorStream"' in index.text
         assert 'id="llmFlavorScope"' in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
-        assert '/static/styles.css?v=20260815-health-center1' in index.text
+        assert '/static/styles.css?v=20260815-topology-fill1' in index.text
         assert '/static/app.js?v=20260815-webgl-depth1' in index.text
         assert '<div class="health-value"><strong id="healthScore">--</strong></div>' in index.text
         assert "<small>HEALTH</small>" not in index.text
@@ -80,6 +80,9 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert ".topology-volume" in styles.text
         assert ".topology-depth-rail" in styles.text
         assert "--leader-length" in styles.text
+        assert ".topology-panel { min-height: 806px; display: flex; flex-direction: column; }" in styles.text
+        assert ".topology-stage { min-height: 742px; flex: 1 1 auto;" in styles.text
+        assert ".command-deck .topology-stage { min-height: 620px; }" in styles.text
 
         metrics = client.get("/metrics")
         assert metrics.status_code == 200
