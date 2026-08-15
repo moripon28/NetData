@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Path as PathParameter, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -123,7 +123,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             CORSMiddleware,
             allow_origins=list(resolved.cors_origins),
             allow_credentials=False,
-            allow_methods=["GET", "POST", "PUT", "PATCH"],
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
             allow_headers=["Content-Type"],
         )
 
@@ -232,6 +232,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "total": len(items),
             "items": items,
         }
+
+    @app.delete("/api/v1/agents/{node_id}")
+    async def delete_agent(
+        node_id: str = PathParameter(min_length=4, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    ) -> dict[str, Any]:
+        deleted = await database.delete_agent(node_id)
+        if deleted is None:
+            raise HTTPException(status_code=404, detail="Agent registration not found")
+        live_snapshot = await service.snapshot()
+        service.latest = live_snapshot
+        await hub.broadcast(live_snapshot)
+        return {"status": "deleted", **deleted}
 
     @app.get("/api/v1/exporters")
     async def exporters() -> dict[str, Any]:

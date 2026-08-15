@@ -29,8 +29,8 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "EASY SETUP" in index.text
         assert "RAW WEBGL" in index.text
         assert "SPATIAL TELEMETRY" in index.text
-        assert 'src="/static/topology3d.js?v=20260815-traffic-gateway6"' in index.text
-        assert 'src="/static/app.js?v=20260815-traffic-gateway6"' in index.text
+        assert 'src="/static/topology3d.js?v=20260815-agent-delete1"' in index.text
+        assert 'src="/static/app.js?v=20260815-agent-delete1"' in index.text
         assert 'data-font-size="small"' in index.text
         assert 'data-font-size="medium"' in index.text
         assert 'data-font-size="large"' in index.text
@@ -40,9 +40,12 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'role="tablist"' in index.text
         assert 'id="llmFlavorStream"' in index.text
         assert 'id="llmFlavorScope"' in index.text
+        assert 'id="agentManageDialog"' in index.text
+        assert 'id="agentDeleteDialog"' in index.text
+        assert "MANAGE" in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
-        assert '/static/styles.css?v=20260815-traffic-gateway6' in index.text
-        assert '/static/app.js?v=20260815-traffic-gateway6' in index.text
+        assert '/static/styles.css?v=20260815-agent-delete1' in index.text
+        assert '/static/app.js?v=20260815-agent-delete1' in index.text
         assert "TRAFFIC LOW → SURGE" in index.text
         assert '<div class="health-value"><strong id="healthScore">--</strong></div>' in index.text
         assert "<small>HEALTH</small>" not in index.text
@@ -77,6 +80,8 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "topologyTrafficLevel" in app_script.text
         assert "trafficTargetId" in app_script.text
         assert "GATEWAYより先の経路は描画しません" in app_script.text
+        assert 'method: "DELETE"' in app_script.text
+        assert "renderAgentManager" in app_script.text
 
         styles = client.get("/static/styles.css")
         assert styles.status_code == 200
@@ -202,6 +207,17 @@ def test_signed_agent_heartbeat(tmp_path):
         assert len(traffic.json()["series"]["all"]) == 20
         assert len(traffic.json()["series"]["agent:node-1234"]) == 20
 
+        deleted = client.delete("/api/v1/agents/node-1234")
+        assert deleted.status_code == 200
+        assert deleted.json() == {
+            "status": "deleted", "node_id": "node-1234", "hostname": "workstation",
+            "source_ip": "testclient", "deleted_traffic_samples": 1,
+        }
+        assert client.get("/api/v1/agents").json()["total"] == 0
+        assert "agent:node-1234" not in client.get("/api/v1/traffic?minutes=1&points=20").json()["series"]
+        assert 'node_id="node-1234"' not in client.get("/metrics").text
+        assert client.delete("/api/v1/agents/node-1234").status_code == 404
+
 
 def test_agent_rejects_bad_signature(tmp_path):
     settings = Settings(data_dir=tmp_path, collector_enabled=False, agent_token="server-secret")
@@ -259,6 +275,8 @@ def test_prometheus_exporter_nodes_are_separate_from_signed_agents(tmp_path):
         assert snapshot["traffic"]["sources"][1]["id"] == "prometheus:exporter-test"
         assert snapshot["traffic"]["total"]["rx_bps"] == 123.0
         assert client.get("/api/v1/agents").json()["total"] == 0
+        assert client.delete("/api/v1/agents/exporter-test").status_code == 404
+        assert client.get("/api/v1/exporters").json()["nodes"][0]["node_id"] == "exporter-test"
         metrics = client.get("/metrics").text
         assert 'netpulse_host_up{node_id="exporter-test",hostname="nas",source="prometheus",os="Linux"} 1' in metrics
         assert 'netpulse_prometheus_exporter_up{target="nas",kind="node_exporter"} 1' in metrics

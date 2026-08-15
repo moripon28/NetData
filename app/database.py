@@ -513,6 +513,36 @@ class Database:
                 row["metadata"] = {}
         return rows
 
+    async def delete_agent(self, node_id: str) -> dict[str, Any] | None:
+        async with self._lock:
+            cursor = await self._db().execute(
+                "SELECT node_id, hostname, source_ip, metadata FROM agent_nodes WHERE node_id = ?",
+                (node_id,),
+            )
+            row = await cursor.fetchone()
+            if row is None:
+                return None
+            item = dict(row)
+            try:
+                metadata = json.loads(item.get("metadata", "{}"))
+            except json.JSONDecodeError:
+                metadata = {}
+            if metadata.get("collection_method") == "prometheus":
+                return None
+
+            traffic_cursor = await self._db().execute(
+                "DELETE FROM host_traffic_samples WHERE node_id = ? AND source_type = 'agent'",
+                (node_id,),
+            )
+            await self._db().execute("DELETE FROM agent_nodes WHERE node_id = ?", (node_id,))
+            await self._db().commit()
+            return {
+                "node_id": item["node_id"],
+                "hostname": item["hostname"],
+                "source_ip": item["source_ip"],
+                "deleted_traffic_samples": max(0, traffic_cursor.rowcount),
+            }
+
     async def observe_baseline(
         self, metric: str, hour_bucket: int, value: float, minimum_samples: int
     ) -> dict[str, Any]:

@@ -38,6 +38,12 @@
     agentDetail: $("agentDetail"), agentSetupButton: $("agentSetupButton"), agentSetupDialog: $("agentSetupDialog"),
     agentSetupClose: $("agentSetupClose"), agentSetupTokenStatus: $("agentSetupTokenStatus"),
     windowsInstallCommand: $("windowsInstallCommand"), linuxInstallCommand: $("linuxInstallCommand"),
+    agentManageButton: $("agentManageButton"), agentManageDialog: $("agentManageDialog"),
+    agentManageClose: $("agentManageClose"), agentManageList: $("agentManageList"), agentManageStatus: $("agentManageStatus"),
+    agentDeleteDialog: $("agentDeleteDialog"), agentDeleteForm: $("agentDeleteForm"),
+    agentDeleteClose: $("agentDeleteClose"), agentDeleteCancel: $("agentDeleteCancel"),
+    agentDeleteName: $("agentDeleteName"), agentDeleteAddress: $("agentDeleteAddress"), agentDeleteId: $("agentDeleteId"),
+    agentDeleteStatus: $("agentDeleteStatus"), agentDeleteConfirm: $("agentDeleteConfirm"),
     anomalyStatus: $("anomalyStatus"), learningBar: $("learningBar"),
     learningProgress: $("learningProgress"), anomalyDetail: $("anomalyDetail"),
     llmSettingsButton: $("llmSettingsButton"), llmRunButton: $("llmRunButton"),
@@ -57,7 +63,7 @@
     snapshot: null, devices: [], rx: [], tx: [], filter: "all", search: "", selectedIp: null,
     trafficSelection: "all", trafficSources: [], trafficSeries: {}, trafficTabSignature: "", trafficWindowMinutes: 5,
     topologyNodes: [], topologyScene: null, selectedTopologyNode: null,
-    socket: null, reconnectTimer: null, reports: [], llmSettings: null,
+    socket: null, reconnectTimer: null, reports: [], llmSettings: null, agents: [], selectedAgent: null,
     flavorSignature: "", flavorGeneration: 0,
   };
   const fontSizeKey = "netpulse.fontSize";
@@ -505,6 +511,7 @@
     }
 
     const agents = snapshot.agents || { online: 0, total: 0, items: [] };
+    state.agents = agents.items || [];
     elements.agentCount.textContent = `${agents.online || 0} / ${agents.total || 0}`;
     elements.agentCount.className = `mini-status ${(agents.online || 0) > 0 ? "online" : agents.configured ? "checking" : "disabled"}`;
     if (agents.items?.length) {
@@ -519,6 +526,7 @@
       ? "登録トークンはサーバー側で設定済みです。実行時に値を1回入力します。"
       : "先にRaspberry Pi上の .env に32文字以上の AGENT_TOKEN を設定し、NetPulseを再作成してください。";
     elements.agentSetupTokenStatus.classList.toggle("warning", !agents.configured);
+    renderAgentManager();
 
     const insights = snapshot.insights || { status: "learning", learning_progress: 0, active: [] };
     setMiniStatus(elements.anomalyStatus, insights.status);
@@ -841,6 +849,66 @@
     elements.agentSetupDialog.showModal();
   }
 
+  function renderAgentManager() {
+    elements.agentManageButton.disabled = state.agents.length === 0;
+    if (!state.agents.length) {
+      elements.agentManageList.innerHTML = '<span class="agent-empty">登録済みエージェントはありません。</span>';
+      return;
+    }
+    elements.agentManageList.innerHTML = state.agents.map((agent) => {
+      const online = agent.status === "online";
+      const address = agent.source_ip && agent.source_ip !== "unknown" ? agent.source_ip : "IP不明";
+      return `<article class="agent-manage-row">
+        <span class="agent-manager-state ${online ? "online" : "offline"}"><i></i>${online ? "ONLINE" : "OFFLINE"}</span>
+        <div class="agent-manager-identity"><strong>${escapeHtml(agent.hostname)}</strong><span>${escapeHtml(address)} · ${relativeTime(agent.last_seen)}</span><code>${escapeHtml(agent.node_id)}</code></div>
+        <button class="agent-remove-button" type="button" data-agent-id="${escapeHtml(agent.node_id)}">DELETE</button>
+      </article>`;
+    }).join("");
+  }
+
+  function openAgentManager() {
+    elements.agentManageStatus.textContent = "";
+    renderAgentManager();
+    elements.agentManageDialog.showModal();
+  }
+
+  function openAgentDelete(nodeId) {
+    const agent = state.agents.find((item) => item.node_id === nodeId);
+    if (!agent) return;
+    state.selectedAgent = agent;
+    elements.agentDeleteName.textContent = agent.hostname || agent.node_id;
+    elements.agentDeleteAddress.textContent = agent.source_ip && agent.source_ip !== "unknown" ? agent.source_ip : "IPアドレス不明";
+    elements.agentDeleteId.textContent = agent.node_id;
+    elements.agentDeleteStatus.textContent = "";
+    elements.agentDeleteConfirm.disabled = false;
+    elements.agentDeleteDialog.showModal();
+  }
+
+  function closeAgentDelete() {
+    elements.agentDeleteDialog.close();
+    state.selectedAgent = null;
+  }
+
+  async function deleteSelectedAgent(event) {
+    event.preventDefault();
+    const agent = state.selectedAgent;
+    if (!agent) return;
+    elements.agentDeleteConfirm.disabled = true;
+    elements.agentDeleteStatus.textContent = "削除しています…";
+    try {
+      const response = await fetch(`/api/v1/agents/${encodeURIComponent(agent.node_id)}`, { method: "DELETE" });
+      if (!response.ok) throw new Error(await apiError(response));
+      const result = await response.json();
+      closeAgentDelete();
+      const snapshotResponse = await fetch("/api/v1/snapshot");
+      if (snapshotResponse.ok) applySnapshot(await snapshotResponse.json());
+      elements.agentManageStatus.textContent = `${result.hostname} を削除しました。保存済み通信履歴 ${result.deleted_traffic_samples || 0} 件も削除済みです。`;
+    } catch (error) {
+      elements.agentDeleteStatus.textContent = `削除できません: ${error.message}`;
+      elements.agentDeleteConfirm.disabled = false;
+    }
+  }
+
   async function copyAgentCommand(button) {
     const target = $(button.dataset.copyTarget);
     if (!target) return;
@@ -887,6 +955,15 @@
     if (state.selectedTopologyNode?.ip) openDevice(state.selectedTopologyNode.ip);
   });
   elements.agentSetupButton.addEventListener("click", openAgentSetup);
+  elements.agentManageButton.addEventListener("click", openAgentManager);
+  elements.agentManageClose.addEventListener("click", () => elements.agentManageDialog.close());
+  elements.agentManageList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-agent-id]");
+    if (button) openAgentDelete(button.dataset.agentId);
+  });
+  elements.agentDeleteForm.addEventListener("submit", deleteSelectedAgent);
+  elements.agentDeleteClose.addEventListener("click", closeAgentDelete);
+  elements.agentDeleteCancel.addEventListener("click", closeAgentDelete);
   document.querySelectorAll(".agent-copy-button").forEach((button) => button.addEventListener("click", () => copyAgentCommand(button)));
   elements.form.addEventListener("submit", async (event) => {
     event.preventDefault();

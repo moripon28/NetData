@@ -130,6 +130,17 @@ async def test_database_round_trip(tmp_path):
         assert traffic_history[-1]["source_type"] == "agent"
         assert traffic_history[-1]["rx_bps"] == 2048
 
+        deleted_agent = await database.delete_agent("node-test")
+        assert deleted_agent == {
+            "node_id": "node-test",
+            "hostname": "test-host",
+            "source_ip": "192.168.10.50",
+            "deleted_traffic_samples": 1,
+        }
+        assert await database.agents() == []
+        assert await database.host_traffic_history(1, ["node-test"]) == []
+        assert await database.delete_agent("node-test") is None
+
         for value in (10.0, 11.0, 9.0, 10.5, 9.5, 10.0, 11.0, 9.0, 10.5, 9.5):
             await database.observe_baseline("test_metric", 12, value, 10)
         baseline = await database.observe_baseline("test_metric", 12, 50.0, 10)

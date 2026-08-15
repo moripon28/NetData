@@ -17,7 +17,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=20260815-traffic-gateway6">
+  <link rel="stylesheet" href="/static/styles.css?v=20260815-agent-delete1">
 </head>
 <body>
   <div class="ambient ambient-a" aria-hidden="true"></div>
@@ -191,7 +191,7 @@
             <div class="horizon-title"><span class="horizon-icon">▣</span><div><small>HOST TELEMETRY</small><h3>AGENT FLEET</h3></div><b class="mini-status" id="agentCount">0 / 0</b></div>
             <div class="agent-node-list" id="agentNodes"><span class="agent-empty">Windows/Linuxエージェントを待っています。</span></div>
             <p id="agentDetail">署名付きハートビートで端末内部を観測します。</p>
-            <button class="agent-setup-button" id="agentSetupButton" type="button">EASY SETUP</button>
+            <div class="agent-actions"><button class="agent-setup-button" id="agentSetupButton" type="button">EASY SETUP</button><button class="agent-manage-button" id="agentManageButton" type="button" disabled>MANAGE</button></div>
           </section>
           <section class="horizon-card anomaly-card">
             <div class="horizon-title"><span class="horizon-icon">⌁</span><div><small>BEHAVIOR MODEL</small><h3>ANOMALY RADAR</h3></div><b class="mini-status learning" id="anomalyStatus">LEARNING</b></div>
@@ -277,6 +277,25 @@
     </form>
   </dialog>
 
+  <dialog id="agentManageDialog" class="settings-dialog agent-manage-dialog">
+    <div class="agent-manage-form">
+      <div class="dialog-head"><div><small>HOST AGENT MANAGEMENT</small><h2>監視エージェントを管理</h2></div><button id="agentManageClose" type="button" aria-label="閉じる">×</button></div>
+      <p class="form-hint">登録済みのWindows/Linuxエージェントを一覧表示します。同名の端末はIPアドレスとエージェントIDで区別できます。</p>
+      <div class="agent-manage-list" id="agentManageList"><span class="agent-empty">登録済みエージェントはありません。</span></div>
+      <p class="agent-manage-status" id="agentManageStatus" role="status"></p>
+    </div>
+  </dialog>
+
+  <dialog id="agentDeleteDialog" class="agent-delete-dialog">
+    <form id="agentDeleteForm">
+      <div class="dialog-head"><div><small>REMOVE HOST AGENT</small><h2>この登録を削除しますか？</h2></div><button id="agentDeleteClose" type="button" aria-label="閉じる">×</button></div>
+      <div class="agent-delete-target"><strong id="agentDeleteName">—</strong><span id="agentDeleteAddress">—</span><code id="agentDeleteId">—</code></div>
+      <p class="agent-delete-warning">登録情報と、このエージェントの保存済み通信履歴を削除します。エージェントがまだ稼働している場合は次のハートビートで再登録されるため、不要な端末では先にNetPulse Agentを停止またはアンインストールしてください。</p>
+      <p class="form-status" id="agentDeleteStatus" role="status"></p>
+      <div class="dialog-actions"><button id="agentDeleteCancel" type="button" class="cancel">CANCEL</button><button id="agentDeleteConfirm" type="submit" class="danger-action">DELETE AGENT</button></div>
+    </form>
+  </dialog>
+
   <dialog id="llmSettingsDialog" class="settings-dialog">
     <form id="llmSettingsForm">
       <div class="dialog-head"><div><small>LOCAL AI SETTINGS</small><h2>ネットワーク報告</h2></div><button id="llmSettingsClose" type="button" aria-label="閉じる">×</button></div>
@@ -300,7 +319,7 @@
     </form>
   </dialog>
 
-  <script src="/static/topology3d.js?v=20260815-traffic-gateway6" defer></script>
-  <script src="/static/app.js?v=20260815-traffic-gateway6" defer></script>
+  <script src="/static/topology3d.js?v=20260815-agent-delete1" defer></script>
+  <script src="/static/app.js?v=20260815-agent-delete1" defer></script>
 </body>
 </html>
