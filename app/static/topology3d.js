@@ -23,8 +23,6 @@
   const MAX_DISTANCE = 12.8;
   const LABEL_RESERVED_SELECTORS = [
     ".topology-scene-meta",
-    ".llm-flavor-stream",
-    ".topology-inspector",
     ".topology-legend",
   ];
 

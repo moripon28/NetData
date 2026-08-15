@@ -29,7 +29,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "EASY SETUP" in index.text
         assert "RAW WEBGL" in index.text
         assert "SPATIAL TELEMETRY" in index.text
-        assert 'src="/static/topology3d.js?v=20260815-agent-delete1"' in index.text
+        assert 'src="/static/topology3d.js?v=20260815-node-panel-overlap1"' in index.text
         assert 'src="/static/app.js?v=20260815-agent-uninstall1"' in index.text
         assert 'data-font-size="small"' in index.text
         assert 'data-font-size="medium"' in index.text
@@ -44,7 +44,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'id="agentDeleteDialog"' in index.text
         assert "MANAGE" in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
-        assert '/static/styles.css?v=20260815-agent-delete1' in index.text
+        assert '/static/styles.css?v=20260815-node-panel-overlap1' in index.text
         assert '/static/app.js?v=20260815-agent-uninstall1' in index.text
         assert "TRAFFIC LOW → SURGE" in index.text
         assert '<div class="health-value"><strong id="healthScore">--</strong></div>' in index.text
@@ -55,6 +55,8 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "NetPulseTopology3D" in topology_script.text
         assert "findLabelPlacement" in topology_script.text
         assert "reservedLabelRects" in topology_script.text
+        assert '".llm-flavor-stream"' not in topology_script.text
+        assert '".topology-inspector"' not in topology_script.text
         assert "collidesWithCard" in topology_script.text
         assert "collidesWithReserved" in topology_script.text
         assert "appendCandidate" in topology_script.text
@@ -95,6 +97,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "min-width: calc(112 * var(--ui-font-unit))" in styles.text
         assert "max-width: calc(180 * var(--ui-font-unit))" in styles.text
         assert ".topology-node-label.selected .node-label-metrics { display: flex; }" in styles.text
+        assert ".llm-flavor-stream { position: absolute; z-index: 8;" in styles.text
         assert ".node-label-glance" in styles.text
         assert ".node-flow-readout" in styles.text
         assert ".node-traffic-meter" in styles.text
