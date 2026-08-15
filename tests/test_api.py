@@ -29,8 +29,8 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "EASY SETUP" in index.text
         assert "RAW WEBGL" in index.text
         assert "SPATIAL TELEMETRY" in index.text
-        assert 'src="/static/topology3d.js?v=20260815-webgl-depth1"' in index.text
-        assert 'src="/static/app.js?v=20260815-webgl-depth1"' in index.text
+        assert 'src="/static/topology3d.js?v=20260815-traffic-gateway6"' in index.text
+        assert 'src="/static/app.js?v=20260815-traffic-gateway6"' in index.text
         assert 'data-font-size="small"' in index.text
         assert 'data-font-size="medium"' in index.text
         assert 'data-font-size="large"' in index.text
@@ -41,8 +41,9 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'id="llmFlavorStream"' in index.text
         assert 'id="llmFlavorScope"' in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
-        assert '/static/styles.css?v=20260815-wide-layout1' in index.text
-        assert '/static/app.js?v=20260815-webgl-depth1' in index.text
+        assert '/static/styles.css?v=20260815-traffic-gateway6' in index.text
+        assert '/static/app.js?v=20260815-traffic-gateway6' in index.text
+        assert "TRAFFIC LOW → SURGE" in index.text
         assert '<div class="health-value"><strong id="healthScore">--</strong></div>' in index.text
         assert "<small>HEALTH</small>" not in index.text
 
@@ -52,12 +53,19 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "findLabelPlacement" in topology_script.text
         assert "reservedLabelRects" in topology_script.text
         assert "collidesWithCard" in topology_script.text
+        assert "collidesWithReserved" in topology_script.text
+        assert "appendCandidate" in topology_script.text
         assert "createSphereMesh" in topology_script.text
         assert "meshVertex" in topology_script.text
         assert "gl.DEPTH_TEST" in topology_script.text
         assert "drawMesh" in topology_script.text
         assert "gl.POINTS" in topology_script.text
         assert "updateLabelLeader" in topology_script.text
+        assert "appendTrafficGlow" in topology_script.text
+        assert "trafficColor" in topology_script.text
+        assert "trafficTargetId" in topology_script.text
+        assert "node-flow-readout" in topology_script.text
+        assert "compactRateLabel" in topology_script.text
 
         app_script = client.get("/static/app.js")
         assert app_script.status_code == 200
@@ -66,6 +74,9 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "topologySocketCount" in app_script.text
         assert "liveSocketNodes" in app_script.text
         assert 'role === "agent" ? "AGENT" : "PROM"' in app_script.text
+        assert "topologyTrafficLevel" in app_script.text
+        assert "trafficTargetId" in app_script.text
+        assert "GATEWAYより先の経路は描画しません" in app_script.text
 
         styles = client.get("/static/styles.css")
         assert styles.status_code == 200
@@ -77,6 +88,10 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "max-width: calc(180 * var(--ui-font-unit))" in styles.text
         assert ".topology-node-label.selected .node-label-metrics { display: flex; }" in styles.text
         assert ".node-label-glance" in styles.text
+        assert ".node-flow-readout" in styles.text
+        assert ".node-traffic-meter" in styles.text
+        assert 'html[data-font-size="large"] .llm-flavor-stream { display: none; }' in styles.text
+        assert 'html[data-font-size="large"] .topology-stage { min-height: 862px; }' in styles.text
         assert ".topology-volume" in styles.text
         assert ".topology-depth-rail" in styles.text
         assert "--leader-length" in styles.text

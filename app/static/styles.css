@@ -122,6 +122,7 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 .llm-flavor-viewport pre { display: inline; margin: 0; color: rgba(142,231,196,.29); font: 7px/1.72 var(--mono); letter-spacing: .055em; white-space: pre-wrap; overflow-wrap: anywhere; text-shadow: 0 0 8px rgba(76,231,219,.12); }
 .llm-flavor-viewport > i { display: inline-block; width: 4px; height: 8px; margin-left: 2px; vertical-align: -1px; background: rgba(156,255,206,.42); box-shadow: 0 0 7px rgba(156,255,206,.2); animation: llm-cursor 1.05s steps(1) infinite; }
 @keyframes llm-cursor { 50% { opacity: .15; } }
+html[data-font-size="large"] .llm-flavor-stream { display: none; }
 .topology-inspector { position: absolute; z-index: 8; left: 18px; bottom: 18px; width: min(345px, calc(100% - 36px)); min-height: 158px; padding: 15px 16px 13px; border: 1px solid rgba(76,231,219,.2); border-top-color: rgba(76,231,219,.52); background: linear-gradient(145deg, rgba(5,19,19,.94), rgba(5,11,12,.84)); backdrop-filter: blur(12px); box-shadow: 0 18px 55px rgba(0,0,0,.32); }
 .topology-inspector::before { content: "SELECTED NODE // LIVE"; position: absolute; left: 14px; top: -6px; padding: 0 6px; background: #071211; color: var(--cyan); font: 6px var(--mono); letter-spacing: .14em; }
 .topology-inspector header { display: flex; justify-content: space-between; gap: 14px; }
@@ -139,7 +140,7 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 .topology-inspector button:hover { border-color: rgba(76,231,219,.55); background: rgba(76,231,219,.1); }
 .topology-legend { position: absolute; right: 17px; bottom: 15px; z-index: 8; display: flex; gap: 15px; color: var(--muted); font: 7px var(--mono); letter-spacing: .08em; }
 .topology-legend span { display: flex; align-items: center; gap: 5px; }.topology-legend i { width: 5px; height: 5px; border-radius: 50%; }
-.dot-online { background: var(--mint); box-shadow: 0 0 7px var(--mint); }.dot-warning { background: var(--orange); box-shadow: 0 0 7px var(--orange); }.dot-offline { background: #53635d; }.dot-flow { background: var(--violet); box-shadow: 0 0 7px var(--violet); }
+.dot-online { background: var(--mint); box-shadow: 0 0 7px var(--mint); }.dot-warning { background: var(--orange); box-shadow: 0 0 7px var(--orange); }.dot-offline { background: #53635d; }.topology-legend .dot-flow { width: 34px; height: 2px; border-radius: 0; background: linear-gradient(90deg, var(--mint), var(--cyan), var(--violet), var(--orange), var(--danger)); box-shadow: 0 0 8px rgba(167,139,250,.62); }
 
 .health-panel { min-height: 0; }
 .health-command-body { min-height: 0; display: grid; grid-template-columns: 148px minmax(0, 1fr); }
@@ -286,8 +287,11 @@ dialog textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px 
 .topology-node-label:focus-visible .node-label-metrics, .topology-node-label.selected .node-label-metrics { display: flex; }
 .node-label-glance { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(var(--node-color),.11); color: rgba(var(--node-color),.72); font: 6px var(--mono); letter-spacing: .07em; }
 .node-label-glance b { color: #aebfb9; font-weight: 500; }
-.node-activity-meter { position: relative; display: block; height: 2px; margin-top: 5px; overflow: hidden; background: rgba(var(--node-color),.07); }
-.node-activity-meter i { position: absolute; inset: 0 auto 0 0; width: var(--activity); background: linear-gradient(90deg, rgba(var(--node-color),.18), rgb(var(--node-color))); box-shadow: 0 0 7px rgba(var(--node-color),.5); transition: width .65s ease; }
+.node-flow-readout { --flow-color: 156,255,206; color: rgb(var(--flow-color)); font: 600 6px var(--mono); letter-spacing: .04em; white-space: nowrap; text-shadow: 0 0 8px rgba(var(--flow-color),.4); }
+.node-flow-readout[data-traffic-band="high"], .node-flow-readout[data-traffic-band="surge"] { text-shadow: 0 0 12px rgba(var(--flow-color),.78); }
+.node-traffic-meter { --flow-color: 156,255,206; position: relative; display: block; height: 3px; margin-top: 4px; overflow: visible; background: rgba(var(--flow-color),.07); }
+.node-traffic-meter i { position: absolute; inset: 0 auto 0 0; width: var(--traffic); min-width: 3px; background: linear-gradient(90deg, rgba(var(--flow-color),.2), rgb(var(--flow-color))); box-shadow: 0 0 5px rgba(var(--flow-color),.44); transition: width .65s ease, background .65s ease, box-shadow .65s ease; }
+.node-traffic-meter[data-traffic-band="high"] i, .node-traffic-meter[data-traffic-band="surge"] i { box-shadow: 0 0 11px rgba(var(--flow-color),.85), 0 0 22px rgba(var(--flow-color),.34); }
 .topology-scene-meta { width: min(390px, calc(100% - 36px)); padding: 9px 11px 10px; border-left: 1px solid rgba(76,231,219,.2); background: linear-gradient(90deg, rgba(3,14,16,.72), transparent); text-shadow: 0 1px 8px #000; }
 .topology-readouts { display: grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 1px; margin-top: 3px; background: rgba(76,231,219,.08); }
 .topology-readouts span { min-width: 0; display: grid; gap: 3px; padding: 6px 7px; background: rgba(3,13,15,.88); }
@@ -307,6 +311,10 @@ dialog textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px 
   .topology-camera-hud { top: auto; right: 14px; bottom: 48px; width: 218px; }
   .topology-readouts { grid-template-columns: repeat(2, minmax(0,1fr)); }
 }
+@media (min-width: 1121px) {
+  html[data-font-size="large"] .topology-panel { min-height: 926px; }
+  html[data-font-size="large"] .topology-stage { min-height: 862px; }
+}
 @media (max-width: 650px) {
   .topology-scene-meta { width: calc(100% - 24px); padding: 7px 8px; }
   .topology-readouts { grid-template-columns: repeat(4, minmax(0,1fr)); }
@@ -315,4 +323,5 @@ dialog textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px 
   .topology-camera-hud, .topology-depth-rail { display: none; }
   .topology-node-label { min-width: 96px; max-width: 152px; }
   .node-label-glance { font-size: 5px; }
+  .node-flow-readout { font-size: 4px; }
 }

@@ -38,6 +38,35 @@
     return COLORS.mint;
   }
 
+  function mixColor(first, second, amount) {
+    const ratio = clamp(amount, 0, 1);
+    return first.map((value, index) => index === 3 ? 1 : value + (second[index] - value) * ratio);
+  }
+
+  function trafficColor(level) {
+    const intensity = clamp(Number(level) || 0, 0, 1);
+    if (intensity < 0.35) return mixColor(COLORS.mint, COLORS.cyan, intensity / 0.35);
+    if (intensity < 0.68) return mixColor(COLORS.cyan, COLORS.violet, (intensity - 0.35) / 0.33);
+    if (intensity < 0.86) return mixColor(COLORS.violet, COLORS.orange, (intensity - 0.68) / 0.18);
+    return mixColor(COLORS.orange, COLORS.danger, (intensity - 0.86) / 0.14);
+  }
+
+  function trafficBand(level, rate) {
+    if (!(Number(rate) > 0)) return "idle";
+    if (level < 0.35) return "low";
+    if (level < 0.68) return "active";
+    if (level < 0.86) return "high";
+    return "surge";
+  }
+
+  function colorCss(color) {
+    return color.slice(0, 3).map((value) => Math.round(value * 255)).join(",");
+  }
+
+  function compactRateLabel(value) {
+    return String(value || "0 bps").replace(/\.0 (?=[KMGT]bps$)/, " ").replace(/\s*bps$/, "").replace(/\s+/g, "");
+  }
+
   function layoutNodes(nodes) {
     const groups = { core: [], infrastructure: [], telemetry: [], devices: [] };
     nodes.forEach((node) => {
@@ -320,6 +349,28 @@
       target.push(first.x, first.y, color[0], color[1], color[2], alpha, second.x, second.y, color[0], color[1], color[2], alpha);
     }
 
+    function appendTrafficGlow(target, first, second, color, intensity, size) {
+      if (!first.visible || !second.visible) return;
+      const strength = clamp(Number(intensity) || 0, 0, 1);
+      appendLine(target, first, second, color, 0.2 + strength * 0.64);
+      if (strength < 0.08) return;
+      const deltaX = second.x - first.x;
+      const deltaY = second.y - first.y;
+      const length = Math.hypot(deltaX, deltaY) || 1;
+      const spread = 0.7 + strength * 2.5;
+      const offsetX = (-deltaY / length) * spread * 2 / Math.max(1, size.width);
+      const offsetY = (deltaX / length) * spread * 2 / Math.max(1, size.height);
+      [-1, 1].forEach((direction) => {
+        appendLine(
+          target,
+          { ...first, x: first.x + offsetX * direction, y: first.y + offsetY * direction },
+          { ...second, x: second.x + offsetX * direction, y: second.y + offsetY * direction },
+          color,
+          0.035 + strength * 0.16,
+        );
+      });
+    }
+
     function appendScreenRing(target, projected, radiusPixels, color, alpha, size) {
       const segments = 28;
       for (let index = 0; index < segments; index += 1) {
@@ -384,22 +435,39 @@
       });
 
       projectedNodes = nodes.map((node) => ({ node, projected: project(node.position, view, size) }));
+      const projectedById = new Map(projectedNodes.map((item) => [item.node.id, item]));
       const coreProjection = project([0, 0, 0], view, size);
 
       projectedNodes.forEach(({ node, projected }, index) => {
         const color = statusColor(node);
         const offline = ["offline", "unreachable", "disabled", "unknown"].includes(String(node.status).toLowerCase());
         const activity = offline ? 0.02 : clamp(Number(node.activityLevel) || 0.12, 0.05, 1);
-        if (node.role !== "core") appendLine(lines, coreProjection, projected, color, node.status === "offline" ? 0.08 : 0.19);
+        if (node.role !== "core") appendLine(lines, coreProjection, projected, color, offline ? 0.055 : 0.12);
 
-        if (node.role !== "core" && !["offline", "unreachable", "disabled"].includes(String(node.status).toLowerCase())) {
-          const particleCount = node.role === "device" ? 1 : 1 + Math.round(activity * 2);
-          for (let particleIndex = 0; particleIndex < particleCount; particleIndex += 1) {
-            const progress = ((now * (0.0001 + particleIndex * 0.000025) + index * 0.173 + particleIndex * 0.41) % 1);
-            const world = node.position.map((value) => value * progress);
-            const particle = project(world, view, size);
-            points.push(particle.x, particle.y, 5.5 * particle.scale, color[0], color[1], color[2], 0.72);
-          }
+        const trafficTarget = node.trafficTargetId ? projectedById.get(node.trafficTargetId) : null;
+        if (trafficTarget && node.trafficMeasured && !offline) {
+          const level = clamp(Number(node.trafficLevel) || 0, 0, 1);
+          const flowColor = trafficColor(level);
+          appendTrafficGlow(lines, projected, trafficTarget.projected, flowColor, level, size);
+          const rx = Math.max(0, Number(node.rxBps) || 0);
+          const tx = Math.max(0, Number(node.txBps) || 0);
+          const total = rx + tx;
+          const addParticles = (rate, from, to, directionOffset) => {
+            if (!(rate > 0) || !(total > 0)) return;
+            const share = rate / total;
+            const particleCount = 1 + Math.round(level * 3 * share);
+            const speed = 0.00011 + level * 0.00052;
+            for (let particleIndex = 0; particleIndex < particleCount; particleIndex += 1) {
+              const progress = reducedMotion.matches
+                ? (particleIndex + 1) / (particleCount + 1)
+                : (now * speed + index * 0.173 + particleIndex / particleCount + directionOffset) % 1;
+              const world = from.position.map((value, axis) => value + (to.position[axis] - value) * progress);
+              const particle = project(world, view, size);
+              points.push(particle.x, particle.y, (5 + level * 8) * particle.scale, flowColor[0], flowColor[1], flowColor[2], 0.52 + level * 0.42);
+            }
+          };
+          addParticles(tx, node, trafficTarget.node, 0);
+          addParticles(rx, trafficTarget.node, node, 0.47);
         }
 
         const baseSize = node.role === "core" ? 48 : node.role === "gateway" ? 25 : node.role === "device" ? 13 : 18;
@@ -546,23 +614,37 @@
       const angles = [0, -Math.PI / 4, Math.PI / 4, Math.PI, -Math.PI * 3 / 4, Math.PI * 3 / 4, -Math.PI / 2, Math.PI / 2];
       const candidates = [];
       const seen = new Set();
+      const appendCandidate = (rawX, rawY, edgePenalty = 0) => {
+        const x = clamp(rawX, LABEL_MARGIN, Math.max(LABEL_MARGIN, size.width - LABEL_MARGIN - width));
+        const y = clamp(rawY, LABEL_MARGIN, Math.max(LABEL_MARGIN, size.height - LABEL_MARGIN - height));
+        const key = `${Math.round(x)}:${Math.round(y)}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        candidates.push({
+          x, y,
+          edgePenalty: edgePenalty + Math.abs(rawX - x) + Math.abs(rawY - y),
+          distance: Math.hypot(x + width / 2 - anchor.x, y + height / 2 - anchor.y),
+        });
+      };
       for (let ring = 0; ring < 7; ring += 1) {
         angles.forEach((angle) => {
           const horizontalDistance = LABEL_GAP + width / 2 + ring * 30;
           const verticalDistance = LABEL_GAP + height / 2 + ring * 24;
           const rawX = anchor.x + Math.cos(angle) * horizontalDistance - width / 2;
           const rawY = anchor.y + Math.sin(angle) * verticalDistance - height / 2;
-          const x = clamp(rawX, LABEL_MARGIN, Math.max(LABEL_MARGIN, size.width - LABEL_MARGIN - width));
-          const y = clamp(rawY, LABEL_MARGIN, Math.max(LABEL_MARGIN, size.height - LABEL_MARGIN - height));
-          const key = `${Math.round(x)}:${Math.round(y)}`;
-          if (seen.has(key)) return;
-          seen.add(key);
-          candidates.push({
-            x, y,
-            edgePenalty: Math.abs(rawX - x) + Math.abs(rawY - y),
-            distance: Math.hypot(x + width / 2 - anchor.x, y + height / 2 - anchor.y),
-          });
+          appendCandidate(rawX, rawY);
         });
+      }
+      const availableWidth = Math.max(0, size.width - LABEL_MARGIN * 2 - width);
+      const availableHeight = Math.max(0, size.height - LABEL_MARGIN * 2 - height);
+      for (let row = 0; row < 7; row += 1) {
+        for (let column = 0; column < 5; column += 1) {
+          appendCandidate(
+            LABEL_MARGIN + availableWidth * column / 4,
+            LABEL_MARGIN + availableHeight * row / 6,
+            4,
+          );
+        }
       }
       return candidates;
     }
@@ -575,9 +657,15 @@
         const reservedOverlap = reserved.reduce((total, item) => total + intersectionArea(rect, item, LABEL_GAP + 2), 0);
         const movement = previous ? Math.hypot(candidate.x - previous.x, candidate.y - previous.y) : 0;
         const collidesWithCard = occupiedOverlap > 0;
+        const collidesWithReserved = reservedOverlap > 0;
         const score = occupiedOverlap * 1400 + reservedOverlap * 1800 + candidate.edgePenalty * 30 + candidate.distance + movement * 2.2;
-        if (!best || Number(collidesWithCard) < Number(best.collidesWithCard) || (collidesWithCard === best.collidesWithCard && score < best.score)) {
-          best = { ...candidate, rect, score, collidesWithCard };
+        if (
+          !best
+          || Number(collidesWithCard) < Number(best.collidesWithCard)
+          || (collidesWithCard === best.collidesWithCard && Number(collidesWithReserved) < Number(best.collidesWithReserved))
+          || (collidesWithCard === best.collidesWithCard && collidesWithReserved === best.collidesWithReserved && score < best.score)
+        ) {
+          best = { ...candidate, rect, score, collidesWithCard, collidesWithReserved };
         }
       });
       return best;
@@ -712,17 +800,33 @@
         const glance = document.createElement("span");
         glance.className = "node-label-glance";
         const linkType = document.createElement("span");
-        linkType.textContent = `${node.linkType || "DISCOVERY"} LINK`;
+        linkType.textContent = node.trafficMeasured ? (node.linkType || "LOCAL") : `${node.linkType || "DISCOVERY"} LINK`;
         const socketCount = document.createElement("b");
         socketCount.textContent = node.socketCount == null ? "SOCKETS —" : `${node.socketCount} SOCK`;
-        glance.append(linkType, socketCount);
-        label.append(glance);
 
-        const activity = document.createElement("span");
-        activity.className = "node-activity-meter";
-        activity.style.setProperty("--activity", `${Math.round(clamp(Number(node.activityLevel) || 0.05, 0, 1) * 100)}%`);
-        activity.append(document.createElement("i"));
-        label.append(activity);
+        if (node.trafficMeasured) {
+          const rate = Math.max(0, Number(node.rxBps) || 0) + Math.max(0, Number(node.txBps) || 0);
+          const level = clamp(Number(node.trafficLevel) || 0, 0, 1);
+          const flowColor = trafficColor(level);
+          const flow = document.createElement("span");
+          flow.className = "node-flow-readout";
+          flow.dataset.trafficBand = trafficBand(level, rate);
+          flow.style.setProperty("--flow-color", colorCss(flowColor));
+          flow.textContent = `${compactRateLabel(node.trafficRateLabel)} · ${node.socketCount == null ? "S—" : `${node.socketCount}S`}`;
+          glance.append(linkType, flow);
+          label.append(glance);
+
+          const activity = document.createElement("span");
+          activity.className = "node-traffic-meter";
+          activity.dataset.trafficBand = trafficBand(level, rate);
+          activity.style.setProperty("--traffic", `${Math.max(3, Math.round(level * 100))}%`);
+          activity.style.setProperty("--flow-color", colorCss(flowColor));
+          activity.append(document.createElement("i"));
+          label.append(activity);
+        } else {
+          glance.append(linkType, socketCount);
+          label.append(glance);
+        }
 
         if (node.metrics?.length) {
           const metrics = document.createElement("span");

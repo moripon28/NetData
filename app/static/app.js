@@ -546,10 +546,29 @@
 
   function topologyActivity(node) {
     if (topologyStatusClass(node.status) === "offline") return 0.03;
-    const traffic = clamp(Math.log10(Math.max(0, Number(node.rxBps) || 0) + Math.max(0, Number(node.txBps) || 0) + 1) / 7, 0, 1);
+    const traffic = node.trafficMeasured ? topologyTrafficLevel(node.rxBps, node.txBps) : 0;
     const cpu = clamp((finiteNumber(node.cpuPercent) || 0) / 100, 0, 1);
     const sockets = clamp(Math.log10(Math.max(0, finiteNumber(node.socketCount) || 0) + 1) / 2.5, 0, 1);
     return clamp(0.08 + traffic * 0.55 + cpu * 0.22 + sockets * 0.15, 0.08, 1);
+  }
+
+  function topologyTrafficLevel(rxBps, txBps) {
+    const rate = Math.max(0, finiteNumber(rxBps) || 0) + Math.max(0, finiteNumber(txBps) || 0);
+    if (!rate) return 0;
+    return clamp((Math.log10(rate) - 3) / 5, 0.04, 1);
+  }
+
+  function topologyTraffic(rxBps, txBps) {
+    const measured = finiteNumber(rxBps) != null || finiteNumber(txBps) != null;
+    const rx = Math.max(0, finiteNumber(rxBps) || 0);
+    const tx = Math.max(0, finiteNumber(txBps) || 0);
+    return {
+      rxBps: rx,
+      txBps: tx,
+      trafficMeasured: measured,
+      trafficLevel: measured ? topologyTrafficLevel(rx, tx) : 0,
+      trafficRateLabel: measured ? formatRate(rx + tx) : "—",
+    };
   }
 
   function renderTopologyInspector(node) {
@@ -571,7 +590,10 @@
       wrapper.append(label, value);
       elements.topologyNodeMetrics.append(wrapper);
     });
-    elements.topologyNodeDescription.textContent = `${node.description || "このノードから取得できる監視値を表示しています。"}${node.linkType && node.role !== "core" ? ` 観測経路: ${node.linkType}。` : ""}`;
+    const routeNote = node.trafficTargetId
+      ? ` GATEWAYへ向かう発光ルートは、このノードで取得したNIC受信＋送信速度（${node.trafficRateLabel}）を表し、宛先別通信量ではありません。`
+      : "";
+    elements.topologyNodeDescription.textContent = `${node.description || "このノードから取得できる監視値を表示しています。"}${node.linkType && node.role !== "core" ? ` 観測経路: ${node.linkType}。` : ""}${routeNote}`;
     elements.topologyProfileButton.hidden = node.kind !== "device" || !node.ip;
   }
 
@@ -584,12 +606,13 @@
     const representedIps = new Set();
     const health = finiteNumber(summary.health_score);
     const coreStatus = health == null ? "checking" : health >= 85 ? "online" : health >= 65 ? "degraded" : "error";
+    const coreTraffic = topologyTraffic(network.rx_bps, network.tx_bps);
 
     nodes.push({
       id: "core:rp5", role: "core", kind: "system", status: coreStatus,
       title: "RP5 OBSERVER", subtitle: `${String(network.interface || "LOCAL NODE").toUpperCase()} · ${summary.subnet || "SUBNET DETECTING"}`,
       linkType: "LOCAL", socketCount: finiteNumber(system.socket_count), cpuPercent: finiteNumber(system.cpu_percent),
-      rxBps: finiteNumber(network.rx_bps) || 0, txBps: finiteNumber(network.tx_bps) || 0,
+      ...coreTraffic,
       metrics: compactMetrics(
         percentMetric("CPU", system.cpu_percent), percentMetric("MEM", system.memory_percent),
         percentMetric("DISK", system.disk_percent), temperatureMetric("TEMP", system.temperature_c),
@@ -611,13 +634,14 @@
         id: `gateway:${network.gateway}`, role: "gateway", kind: "gateway", status: gatewayOnline ? "online" : "offline",
         title: "NETWORK GATEWAY", subtitle: network.gateway,
         linkType: Object.keys(snmpMetrics).length ? "SNMP" : "ICMP", rxBps: finiteNumber(snmpMetrics.wan_rx_bps) || 0, txBps: finiteNumber(snmpMetrics.wan_tx_bps) || 0,
+        trafficMeasured: false, trafficLevel: 0, trafficRateLabel: "—",
         metrics: compactMetrics(
           metric("LATENCY", network.gateway_latency_ms == null ? "NO RESPONSE" : `${Number(network.gateway_latency_ms).toFixed(1)} ms`),
           metric("LOSS", `${Number(network.packet_loss_percent || 0).toFixed(1)}%`),
           snmpMetrics.wan_rx_bps == null ? null : metric("WAN RX", formatRate(snmpMetrics.wan_rx_bps)),
           snmpMetrics.wan_tx_bps == null ? null : metric("WAN TX", formatRate(snmpMetrics.wan_tx_bps)),
         ),
-        description: "デフォルトゲートウェイの到達性です。WAN通信量はルーターSNMPで取得できた場合だけ表示します。",
+        description: "デフォルトゲートウェイの到達性です。各監視ノードからここへ集まる発光ルートは端末側NICの合計通信量を示します。GATEWAYより先の経路は描画しません。WAN通信量はルーターSNMPで取得できた場合だけカード内に表示します。",
       });
     }
 
@@ -652,7 +676,7 @@
         title: host.hostname || host.node_id || role.toUpperCase(),
         subtitle: [host.os_name, ip].filter(Boolean).join(" · "),
         linkType: role === "agent" ? "AGENT" : "PROM", cpuPercent: finiteNumber(host.cpu_percent),
-        socketCount: finiteNumber(host.socket_count), rxBps: finiteNumber(host.rx_bps) || 0, txBps: finiteNumber(host.tx_bps) || 0,
+        socketCount: finiteNumber(host.socket_count), ...topologyTraffic(host.rx_bps, host.tx_bps),
         metrics: compactMetrics(
           percentMetric("CPU", host.cpu_percent), percentMetric("MEM", host.memory_percent),
           percentMetric("DISK", host.disk_percent), temperatureMetric("TEMP", host.temperature_c),
@@ -723,7 +747,11 @@
       });
     }
 
-    const activeNodes = nodes.map((node) => ({ ...node, activityLevel: topologyActivity(node) }));
+    const gatewayNode = nodes.find((node) => node.role === "gateway");
+    const activeNodes = nodes.map((node) => {
+      const trafficTargetId = gatewayNode && node.role !== "gateway" && node.trafficMeasured ? gatewayNode.id : null;
+      return { ...node, trafficTargetId, activityLevel: topologyActivity(node) };
+    });
     state.topologyNodes = activeNodes;
     const liveCount = activeNodes.filter((node) => topologyStatusClass(node.status) === "online").length;
     const totalCount = activeNodes.reduce((total, node) => total + Math.max(1, Number(node.groupCount) || 1), 0);
@@ -733,7 +761,9 @@
     const processCount = Math.max(0, Number(system.process_count) || 0) + [...(snapshot.agents?.items || []), ...(snapshot.exporters?.nodes || [])].filter((host) => host.status === "online").reduce((total, host) => total + Math.max(0, Number(host.process_count) || 0), 0);
     const aggregateTraffic = snapshot.traffic?.total || {};
     const currentRate = Math.max(0, Number(aggregateTraffic.rx_bps) || 0) + Math.max(0, Number(aggregateTraffic.tx_bps) || 0);
-    elements.topologyNodeCount.textContent = `${liveCount} LIVE / ${totalCount} NODES · ${Math.max(0, activeNodes.length - 1)} LINKS${groupedCount ? ` · ${groupedCount} GROUPED` : ""}`;
+    const observationLinkCount = Math.max(0, activeNodes.length - 1);
+    const trafficRouteCount = activeNodes.filter((node) => node.trafficTargetId && topologyStatusClass(node.status) !== "offline").length;
+    elements.topologyNodeCount.textContent = `${liveCount} LIVE / ${totalCount} NODES · ${observationLinkCount} OBS · ${trafficRouteCount} TRAFFIC${groupedCount ? ` · ${groupedCount} GROUPED` : ""}`;
     elements.topologyTrafficFlux.textContent = formatRate(currentRate);
     elements.topologySocketCount.textContent = liveSocketNodes.length ? String(socketCount) : "—";
     elements.topologyProcessCount.textContent = processCount ? String(processCount) : "—";
