@@ -24,6 +24,14 @@ $u='http://192.168.10.201:39080'; $p=Join-Path $env:TEMP 'netpulse-install.ps1';
 
 WindowsはPython 3が必要です。`python` または `py` コマンドを自動検出します。確認コマンドは `Get-ScheduledTask -TaskName NetPulseAgent` です。
 
+## アンインストール
+
+`EASY SETUP` の `UNINSTALL` タブから、対象OSのコマンドをコピーして管理者権限で実行します。
+
+Windowsでは `NetPulseAgent` スケジュールタスクと `%ProgramData%\NetPulseAgent` を削除します。Linuxでは `netpulse-agent.service`、`/opt/netpulse-agent`、`/etc/netpulse-agent.env` を削除します。どちらも既に一部が削除済みでも再実行できます。
+
+アンインストールは端末上のエージェントだけを削除し、NetPulseサーバーに保存された端末情報と通信履歴は残します。不要な場合は、画面の `AGENT FLEET` → `MANAGE` から対象端末を削除してください。
+
 ## オフラインでインストール
 
 監視端末からNetPulseの配布URLへアクセスできない場合だけ、この `agent` フォルダー全体を端末へコピーし、従来どおり `install-windows.ps1` または `install-linux.sh` を実行できます。

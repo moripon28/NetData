@@ -38,6 +38,7 @@
     agentDetail: $("agentDetail"), agentSetupButton: $("agentSetupButton"), agentSetupDialog: $("agentSetupDialog"),
     agentSetupClose: $("agentSetupClose"), agentSetupTokenStatus: $("agentSetupTokenStatus"),
     windowsInstallCommand: $("windowsInstallCommand"), linuxInstallCommand: $("linuxInstallCommand"),
+    windowsUninstallCommand: $("windowsUninstallCommand"), linuxUninstallCommand: $("linuxUninstallCommand"),
     agentManageButton: $("agentManageButton"), agentManageDialog: $("agentManageDialog"),
     agentManageClose: $("agentManageClose"), agentManageList: $("agentManageList"), agentManageStatus: $("agentManageStatus"),
     agentDeleteDialog: $("agentDeleteDialog"), agentDeleteForm: $("agentDeleteForm"),
@@ -846,7 +847,19 @@
     const server = window.location.origin.replace(/\/$/, "");
     elements.windowsInstallCommand.textContent = `$u='${server}'; $p=Join-Path $env:TEMP 'netpulse-install.ps1'; Invoke-WebRequest "$u/agent/install-windows.ps1" -OutFile $p; powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p -Server $u`;
     elements.linuxInstallCommand.textContent = `curl -fsSL '${server}/agent/install-linux.sh' -o /tmp/netpulse-install.sh && sudo sh /tmp/netpulse-install.sh '${server}'`;
+    elements.windowsUninstallCommand.textContent = `$u='${server}'; $p=Join-Path $env:TEMP 'netpulse-uninstall.ps1'; Invoke-WebRequest "$u/agent/uninstall-windows.ps1" -OutFile $p; powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p`;
+    elements.linuxUninstallCommand.textContent = `curl -fsSL '${server}/agent/uninstall-linux.sh' -o /tmp/netpulse-uninstall.sh && sudo sh /tmp/netpulse-uninstall.sh`;
+    setAgentSetupMode("install");
     elements.agentSetupDialog.showModal();
+  }
+
+  function setAgentSetupMode(mode) {
+    document.querySelectorAll("[data-agent-setup-mode]").forEach((button) => {
+      button.setAttribute("aria-selected", String(button.dataset.agentSetupMode === mode));
+    });
+    document.querySelectorAll("[data-agent-setup-panel]").forEach((panel) => {
+      panel.hidden = panel.dataset.agentSetupPanel !== mode;
+    });
   }
 
   function renderAgentManager() {
@@ -913,9 +926,11 @@
     const target = $(button.dataset.copyTarget);
     if (!target) return;
     const command = target.textContent;
+    let copied = false;
     try {
       if (!navigator.clipboard) throw new Error("Clipboard API unavailable");
       await navigator.clipboard.writeText(command);
+      copied = true;
     } catch (_error) {
       const textarea = document.createElement("textarea");
       textarea.value = command;
@@ -924,11 +939,17 @@
       textarea.style.opacity = "0";
       document.body.appendChild(textarea);
       textarea.select();
-      document.execCommand("copy");
+      copied = document.execCommand("copy");
       textarea.remove();
     }
-    button.textContent = "COPIED";
-    window.setTimeout(() => { button.textContent = "COPY"; }, 1200);
+    if (!copied) {
+      const range = document.createRange();
+      range.selectNodeContents(target);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+    }
+    button.textContent = copied ? "COPIED" : "SELECT TEXT";
+    window.setTimeout(() => { button.textContent = "COPY"; }, copied ? 1200 : 2200);
   }
 
   elements.search.addEventListener("input", (event) => { state.search = event.target.value; renderDevices(); });
@@ -955,6 +976,7 @@
     if (state.selectedTopologyNode?.ip) openDevice(state.selectedTopologyNode.ip);
   });
   elements.agentSetupButton.addEventListener("click", openAgentSetup);
+  document.querySelectorAll("[data-agent-setup-mode]").forEach((button) => button.addEventListener("click", () => setAgentSetupMode(button.dataset.agentSetupMode)));
   elements.agentManageButton.addEventListener("click", openAgentManager);
   elements.agentManageClose.addEventListener("click", () => elements.agentManageDialog.close());
   elements.agentManageList.addEventListener("click", (event) => {

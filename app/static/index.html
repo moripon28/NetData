@@ -263,16 +263,33 @@
     <form method="dialog" class="agent-setup-form">
       <div class="dialog-head"><div><small>HOST AGENT SETUP</small><h2>監視エージェントを追加</h2></div><button id="agentSetupClose" value="cancel" aria-label="閉じる">×</button></div>
       <p class="form-hint">監視したい端末で、OSに合うコマンドを管理者権限で実行します。ファイルの手動コピーや実行場所の移動は不要です。</p>
-      <p class="agent-token-status" id="agentSetupTokenStatus" role="status">登録トークンの設定を確認しています…</p>
-      <section class="agent-command-section">
-        <header><div><strong>Windows</strong><span>管理者として開いたPowerShell</span></div><button class="agent-copy-button" type="button" data-copy-target="windowsInstallCommand">COPY</button></header>
-        <code id="windowsInstallCommand"></code>
-      </section>
-      <section class="agent-command-section">
-        <header><div><strong>Linux</strong><span>sudo可能なターミナル</span></div><button class="agent-copy-button" type="button" data-copy-target="linuxInstallCommand">COPY</button></header>
-        <code id="linuxInstallCommand"></code>
-      </section>
-      <p class="form-hint">実行中に求められる登録トークンには、Raspberry Pi上の <code>AGENT_TOKEN</code> を入力します。トークンは画面やコマンドには埋め込みません。</p>
+      <div class="agent-setup-tabs" role="tablist" aria-label="エージェント操作">
+        <button type="button" role="tab" aria-selected="true" data-agent-setup-mode="install">INSTALL</button>
+        <button type="button" role="tab" aria-selected="false" data-agent-setup-mode="uninstall">UNINSTALL</button>
+      </div>
+      <div class="agent-setup-panel" data-agent-setup-panel="install">
+        <p class="agent-token-status" id="agentSetupTokenStatus" role="status">登録トークンの設定を確認しています…</p>
+        <section class="agent-command-section">
+          <header><div><strong>Windows</strong><span>管理者として開いたPowerShell</span></div><button class="agent-copy-button" type="button" data-copy-target="windowsInstallCommand">COPY</button></header>
+          <code id="windowsInstallCommand"></code>
+        </section>
+        <section class="agent-command-section">
+          <header><div><strong>Linux</strong><span>sudo可能なターミナル</span></div><button class="agent-copy-button" type="button" data-copy-target="linuxInstallCommand">COPY</button></header>
+          <code id="linuxInstallCommand"></code>
+        </section>
+        <p class="form-hint">実行中に求められる登録トークンには、Raspberry Pi上の <code>AGENT_TOKEN</code> を入力します。トークンは画面やコマンドには埋め込みません。</p>
+      </div>
+      <div class="agent-setup-panel" data-agent-setup-panel="uninstall" hidden>
+        <section class="agent-command-section">
+          <header><div><strong>Windows</strong><span>管理者として開いたPowerShell</span></div><button class="agent-copy-button" type="button" data-copy-target="windowsUninstallCommand">COPY</button></header>
+          <code id="windowsUninstallCommand"></code>
+        </section>
+        <section class="agent-command-section">
+          <header><div><strong>Linux</strong><span>sudo可能なターミナル</span></div><button class="agent-copy-button" type="button" data-copy-target="linuxUninstallCommand">COPY</button></header>
+          <code id="linuxUninstallCommand"></code>
+        </section>
+        <p class="form-hint">端末上のタスクまたはサービス、プログラム、登録トークンを削除します。サーバーに残る端末履歴は、必要に応じて <code>MANAGE</code> から削除してください。</p>
+      </div>
       <div class="dialog-actions"><button value="cancel" class="cancel">CLOSE</button></div>
     </form>
   </dialog>
@@ -320,6 +337,6 @@
   </dialog>
 
   <script src="/static/topology3d.js?v=20260815-agent-delete1" defer></script>
-  <script src="/static/app.js?v=20260815-agent-delete1" defer></script>
+  <script src="/static/app.js?v=20260815-agent-uninstall1" defer></script>
 </body>
 </html>

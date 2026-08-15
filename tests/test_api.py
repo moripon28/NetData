@@ -30,7 +30,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "RAW WEBGL" in index.text
         assert "SPATIAL TELEMETRY" in index.text
         assert 'src="/static/topology3d.js?v=20260815-agent-delete1"' in index.text
-        assert 'src="/static/app.js?v=20260815-agent-delete1"' in index.text
+        assert 'src="/static/app.js?v=20260815-agent-uninstall1"' in index.text
         assert 'data-font-size="small"' in index.text
         assert 'data-font-size="medium"' in index.text
         assert 'data-font-size="large"' in index.text
@@ -45,7 +45,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "MANAGE" in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
         assert '/static/styles.css?v=20260815-agent-delete1' in index.text
-        assert '/static/app.js?v=20260815-agent-delete1' in index.text
+        assert '/static/app.js?v=20260815-agent-uninstall1' in index.text
         assert "TRAFFIC LOW → SURGE" in index.text
         assert '<div class="health-value"><strong id="healthScore">--</strong></div>' in index.text
         assert "<small>HEALTH</small>" not in index.text
@@ -82,6 +82,9 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "GATEWAYより先の経路は描画しません" in app_script.text
         assert 'method: "DELETE"' in app_script.text
         assert "renderAgentManager" in app_script.text
+        assert "uninstall-windows.ps1" in app_script.text
+        assert "uninstall-linux.sh" in app_script.text
+        assert 'copied ? "COPIED" : "SELECT TEXT"' in app_script.text
 
         styles = client.get("/static/styles.css")
         assert styles.status_code == 200
@@ -135,6 +138,8 @@ def test_agent_install_files_are_available_without_exposing_other_files(tmp_path
     expected = {
         "install-windows.ps1": "NetPulseAgent",
         "install-linux.sh": "netpulse-agent.service",
+        "uninstall-windows.ps1": "Unregister-ScheduledTask",
+        "uninstall-linux.sh": "systemctl disable --now",
         "netpulse_agent.py": "/api/v1/agent/heartbeat",
         "requirements.txt": "psutil",
     }
