@@ -17,7 +17,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=20260815-node-panel-overlap1">
+  <link rel="stylesheet" href="/static/styles.css?v=20260816-device-grid-2col">
 </head>
 <body>
   <div class="ambient ambient-a" aria-hidden="true"></div>
@@ -211,12 +211,7 @@
             <button class="filter" data-filter="unknown">UNKNOWN</button>
           </div>
         </header>
-        <div class="device-table-wrap">
-          <table>
-            <thead><tr><th>DEVICE</th><th>ADDRESS</th><th>TYPE</th><th>LATENCY</th><th>LAST SEEN</th><th>STATUS</th></tr></thead>
-            <tbody id="deviceRows"><tr class="empty-row"><td colspan="6">端末を検出しています…</td></tr></tbody>
-          </table>
-        </div>
+        <div class="device-grid" id="deviceRows"><p class="device-empty">端末を検出しています…</p></div>
       </article>
 
       <article class="panel llm-panel">

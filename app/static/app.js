@@ -301,19 +301,21 @@
       return filterMatch && (!query || text.includes(query));
     });
     if (!filtered.length) {
-      elements.deviceRows.innerHTML = '<tr class="empty-row"><td colspan="6">条件に一致する端末はありません。</td></tr>';
+      elements.deviceRows.innerHTML = '<p class="device-empty">条件に一致する端末はありません。</p>';
       return;
     }
     elements.deviceRows.innerHTML = filtered.map((device) => {
       const name = device.display_name || device.hostname || `Device ${String(device.ip).split(".").pop()}`;
       const kind = device.device_type || "unknown";
       const latency = device.latency_ms == null ? "—" : `${Number(device.latency_ms).toFixed(1)} ms`;
-      return `<tr data-ip="${escapeHtml(device.ip)}">
-        <td><div class="device-identity"><span class="device-icon">${typeIcons[kind] || "?"}</span><div>${escapeHtml(name)}${device.is_trusted ? '<span class="trusted">✓ TRUSTED</span>' : ""}<small>${escapeHtml(device.mac || "MAC UNKNOWN")}</small></div></div></td>
-        <td class="mono">${escapeHtml(device.ip)}</td><td><span class="type-tag">${escapeHtml(kind)}</span></td>
-        <td class="mono">${latency}</td><td class="mono">${relativeTime(device.last_seen)}</td>
-        <td><span class="status ${device.status === "online" ? "online" : "offline"}"><i></i>${escapeHtml(String(device.status || "unknown").toUpperCase())}</span></td>
-      </tr>`;
+      return `<article class="device-card" data-ip="${escapeHtml(device.ip)}">
+        <div class="device-identity"><span class="device-icon">${typeIcons[kind] || "?"}</span><div>${escapeHtml(name)}${device.is_trusted ? '<span class="trusted">✓ TRUSTED</span>' : ""}<small>${escapeHtml(device.mac || "MAC UNKNOWN")}</small></div></div>
+        <div class="device-card-data">
+          <span class="mono">${escapeHtml(device.ip)}</span><span class="type-tag">${escapeHtml(kind)}</span>
+          <span class="mono">${latency}</span><span class="mono">${relativeTime(device.last_seen)}</span>
+          <span class="status ${device.status === "online" ? "online" : "offline"}"><i></i>${escapeHtml(String(device.status || "unknown").toUpperCase())}</span>
+        </div>
+      </article>`;
     }).join("");
   }
 
@@ -957,7 +959,7 @@
     document.querySelectorAll(".filter").forEach((item) => item.classList.remove("active"));
     button.classList.add("active"); state.filter = button.dataset.filter; renderDevices();
   }));
-  elements.deviceRows.addEventListener("click", (event) => { const row = event.target.closest("tr[data-ip]"); if (row) openDevice(row.dataset.ip); });
+  elements.deviceRows.addEventListener("click", (event) => { const row = event.target.closest("[data-ip]"); if (row) openDevice(row.dataset.ip); });
   elements.trafficTabs.addEventListener("click", (event) => {
     const tab = event.target.closest("[role=tab]");
     if (tab) selectTrafficSource(tab.dataset.sourceId);
