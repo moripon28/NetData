@@ -201,22 +201,9 @@
         </div>
       </article>
 
-      <article class="panel devices-panel">
-        <header class="panel-head devices-head">
-          <div><span class="panel-index">06</span><h2>CONNECTED UNIVERSE</h2></div>
-          <div class="device-controls">
-            <label class="search"><span>⌕</span><input id="deviceSearch" type="search" placeholder="端末を検索" aria-label="端末を検索"></label>
-            <button class="filter active" data-filter="all">ALL</button>
-            <button class="filter" data-filter="online">ONLINE</button>
-            <button class="filter" data-filter="unknown">UNKNOWN</button>
-          </div>
-        </header>
-        <div class="device-grid" id="deviceRows"><p class="device-empty">端末を検出しています…</p></div>
-      </article>
-
       <article class="panel llm-panel">
         <header class="panel-head llm-head">
-          <div><span class="panel-index">07</span><h2>LOCAL LLM NETWORK REPORT</h2></div>
+          <div><span class="panel-index">06</span><h2>LOCAL LLM NETWORK REPORT</h2></div>
           <div class="panel-actions">
             <select id="llmReportHistory" aria-label="過去のLLM報告"><option value="">REPORT HISTORY</option></select>
             <button class="panel-button" id="llmRunButton" type="button">ANALYZE NOW</button>
@@ -230,6 +217,19 @@
           </aside>
           <article class="llm-report-content" id="llmReportContent">右上の LLM SETTINGS からOpenAI互換のローカルLLMを設定してください。</article>
         </div>
+      </article>
+
+      <article class="panel devices-panel">
+        <header class="panel-head devices-head">
+          <div><span class="panel-index">07</span><h2>CONNECTED UNIVERSE</h2></div>
+          <div class="device-controls">
+            <label class="search"><span>⌕</span><input id="deviceSearch" type="search" placeholder="端末を検索" aria-label="端末を検索"></label>
+            <button class="filter active" data-filter="all">ALL</button>
+            <button class="filter" data-filter="online">ONLINE</button>
+            <button class="filter" data-filter="unknown">UNKNOWN</button>
+          </div>
+        </header>
+        <div class="device-grid" id="deviceRows"><p class="device-empty">端末を検出しています…</p></div>
       </article>
 
       <article class="panel events-panel">

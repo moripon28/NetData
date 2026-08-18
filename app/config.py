@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_LLM_SYSTEM_PROMPT = (
@@ -45,6 +50,28 @@ def _csv_env_default(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
     if value is None:
         return default
     return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+AGENT_TOKEN_MIN_LENGTH = 32
+
+
+def validate_agent_token(token: str) -> None:
+    """Fail startup on a structurally weak token; warn on low entropy."""
+    if not token:
+        return
+    if len(token) < AGENT_TOKEN_MIN_LENGTH:
+        raise RuntimeError(
+            f"AGENT_TOKENは{AGENT_TOKEN_MIN_LENGTH}文字以上にしてください。"
+            "乱数値を生成してください（例: openssl rand -hex 32）。"
+        )
+    counts: dict[str, int] = {}
+    for character in token:
+        counts[character] = counts.get(character, 0) + 1
+    entropy = -sum(count / len(token) * math.log2(count / len(token)) for count in counts.values())
+    if entropy < 3.0:
+        logger.warning(
+            "AGENT_TOKENのエントロピーが低いです（%.2f bits/char）。乱数生成した値の使用を推奨します。", entropy
+        )
 
 
 @dataclass(slots=True)
@@ -113,6 +140,7 @@ class Settings:
     llm_report_interval: int = field(default_factory=lambda: _int_env("LLM_REPORT_INTERVAL_MINUTES", 60, 15))
     llm_report_lookback: int = field(default_factory=lambda: _int_env("LLM_REPORT_LOOKBACK_MINUTES", 60, 15))
     llm_request_timeout: int = field(default_factory=lambda: _int_env("LLM_REQUEST_TIMEOUT_SECONDS", 120, 10))
+    llm_allow_external: bool = field(default_factory=lambda: _bool_env("LLM_ALLOW_EXTERNAL", False))
 
     @property
     def database_path(self) -> Path:

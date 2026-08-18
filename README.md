@@ -103,6 +103,7 @@ docker compose down
 | `ANOMALY_MIN_SAMPLES` | `20` | 各時間帯の学習完了に必要なサンプル数 |
 | `LLM_REPORT_ENABLED` | `false` | ローカルLLMによる定期報告を有効化 |
 | `LLM_BASE_URL` | `http://127.0.0.1:1234/v1` | LM Studio等のOpenAI互換Base URL |
+| `LLM_ALLOW_EXTERNAL` | `false` | `true`にするまでBase URLはLAN内アドレス（ループバック/プライベート）に限定 |
 | `LLM_MODEL` | 空 | 報告に使う生成モデル名 |
 | `LLM_SYSTEM_PROMPT` | 日本語の運用報告用 | 報告言語・役割・構成を指定するシステムプロンプト |
 | `LLM_API_KEY` | 空 | 接続先が要求する場合だけ設定するAPIキー |
@@ -141,7 +142,7 @@ TRAFFIC STREAMの既定値は、Raspberry Pi本体とオンラインのAgent／P
 
 vulnintelと同じく、LM StudioやOllamaなどのOpenAI互換APIを利用します。画面右上の `LLM SETTINGS` を開き、Base URLを入力して `一覧取得` を押すと、LLMサーバーが公開している生成モデルを選べます。LM Studioのnative APIも補助的に参照するため、embeddingモデルは候補から除外されます。一覧取得に失敗してもモデル名は手入力できます。システムプロンプトも画面から編集でき、既定値は出力全体を日本語に限定しています。
 
-LM Studioを別のWindows/Linux PCで動かす場合は、サーバーをLANから接続可能にし、Base URLへ `http://<LLM-PCのLAN IP>:1234/v1` を指定します。PCのファイアウォールではTCP 1234をRaspberry Pi `192.168.10.201` からだけ許可してください。インターネット上のAPIを指定することも技術的には可能ですが、本機能は家庭内のローカルLLM利用を前提にしています。
+LM Studioを別のWindows/Linux PCで動かす場合は、サーバーをLANから接続可能にし、Base URLへ `http://<LLM-PCのLAN IP>:1234/v1` を指定します。PCのファイアウォールではTCP 1234をRaspberry Pi `192.168.10.201` からだけ許可してください。既定ではBase URLはLAN内アドレスに限定され、インターネット上のAPIには到達できません（SSRF対策）。公開APIを利用する場合は `LLM_ALLOW_EXTERNAL=true` を明確に設定してください。
 
 設定後は `ANALYZE NOW` で手動報告を確認してから定期分析を有効にしてください。NetPulseは指定期間の監視サンプルを平均・最小・最大へ集約し、到達性、イベント、端末・エージェント状態とともにLLMへ渡します。パケット本文、閲覧URL、保存済みAPIキーはプロンプトに含めません。報告はSQLiteへ保存され、画面の履歴から参照できます。
 

@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app.config import Settings
+from app.config import Settings, validate_agent_token
 from app.database import Database
 from app.llm import LLMConnectionError, LLMReporter, ReportInProgressError
 from app.service import MonitorService
@@ -98,6 +98,7 @@ class WebSocketHub:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or Settings()
+    validate_agent_token(resolved.agent_token)
     hub = WebSocketHub()
     database = Database(resolved.database_path)
     service = MonitorService(resolved, database, hub.broadcast)
@@ -251,16 +252,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def exporters() -> dict[str, Any]:
         return await service.exporters()
 
+    seen_agent_requests: dict[str, float] = {}
+
     @app.post("/api/v1/agent/heartbeat")
     async def agent_heartbeat(request: Request) -> dict[str, Any]:
         if not resolved.agent_token:
             raise HTTPException(status_code=503, detail="Agent enrollment is not configured")
         timestamp_text = request.headers.get("x-agent-timestamp", "")
         signature = request.headers.get("x-agent-signature", "")
-        try:
-            timestamp = int(timestamp_text)
-        except ValueError as exc:
-            raise HTTPException(status_code=401, detail="Invalid agent timestamp") from exc
+        if not timestamp_text.isascii() or not timestamp_text.isdecimal():
+            # int() also accepts Unicode decimal digits, which would break the
+            # ASCII MAC below and surface as an unhandled 500.
+            raise HTTPException(status_code=401, detail="Invalid agent timestamp")
+        timestamp = int(timestamp_text, 10)
         if abs(time.time() - timestamp) > 60:
             raise HTTPException(status_code=401, detail="Expired agent request")
         body = await request.body()
@@ -269,8 +273,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         expected = hmac.new(
             resolved.agent_token.encode("utf-8"), timestamp_text.encode("ascii") + b"." + body, hashlib.sha256
         ).hexdigest()
-        if not hmac.compare_digest(signature, expected):
+        if not hmac.compare_digest(signature.encode("latin-1", "replace"), expected.encode("ascii")):
             raise HTTPException(status_code=401, detail="Invalid agent signature")
+        # The timestamp window (60s) allows replaying a captured valid request,
+        # so remember accepted (timestamp, payload) MACs for 2x the window.
+        seen_key = hashlib.sha256(timestamp_text.encode("ascii") + b"." + body).hexdigest()
+        now = time.time()
+        if seen_key in seen_agent_requests:
+            raise HTTPException(status_code=401, detail="Duplicate agent request")
+        if len(seen_agent_requests) > 4096:
+            for key in [k for k, expires in seen_agent_requests.items() if expires <= now]:
+                seen_agent_requests.pop(key, None)
+        seen_agent_requests[seen_key] = now + 120.0
         try:
             heartbeat = AgentHeartbeat.model_validate_json(body)
         except ValueError as exc:

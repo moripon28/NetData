@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
+import logging
 import os
+import socket
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -14,6 +17,9 @@ from cryptography.fernet import Fernet, InvalidToken
 
 from app.config import DEFAULT_LLM_SYSTEM_PROMPT, Settings
 from app.database import Database
+
+
+logger = logging.getLogger(__name__)
 
 
 SnapshotProvider = Callable[[], Awaitable[dict[str, Any]]]
@@ -31,6 +37,83 @@ class LLMConnectionError(RuntimeError):
 
 class ReportInProgressError(RuntimeError):
     pass
+
+
+_V6_LOCAL_NETWORKS = (ipaddress.ip_network("fc00::/7"),)  # unique-local (LAN)
+
+
+def _is_local_address(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Loopback and RFC1918/ULA (LAN) addresses only.
+
+    Link-local (e.g. 169.254.169.254 cloud metadata) is deliberately excluded
+    so the LLM client cannot be used for SSRF. IPv6 embedding formats
+    (v4-mapped, 6to4, Teredo) are judged by their embedded IPv4 address because
+    Python 3.10's ipaddress.is_private wrongly reports several of them as
+    private (e.g. ::ffff:169.254.169.254, Teredo 2001::/32).
+    """
+    if isinstance(address, ipaddress.IPv6Address):
+        if address.is_loopback:
+            return True
+        if address.ipv4_mapped is not None:
+            return _is_local_address(address.ipv4_mapped)
+        sixtofour = getattr(address, "sixtofour", None)
+        if sixtofour is not None:
+            return _is_local_address(sixtofour)
+        teredo = getattr(address, "teredo", None)
+        if teredo is not None:
+            teredo_server, teredo_client = teredo
+            return _is_local_address(teredo_server) and _is_local_address(teredo_client)
+        return any(address in network for network in _V6_LOCAL_NETWORKS)
+    return (address.is_private or address.is_loopback) and not address.is_link_local
+
+
+def _is_local_target(hostname: str) -> bool:
+    try:
+        addresses = {ipaddress.ip_address(hostname)}
+    except ValueError:
+        try:
+            addresses = {
+                ipaddress.ip_address(item[4][0])
+                for item in socket.getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+            }
+        except socket.gaierror:
+            return False
+    if not addresses:
+        return False
+    return all(_is_local_address(address) for address in addresses)
+
+
+class LocalOnlyTransport(httpx.AsyncBaseTransport):
+    """Enforces the local-only policy at connect time and pins the resolved
+    address, so a DNS answer that changes between validation and connection
+    (DNS rebinding) cannot redirect the request to a non-local target."""
+
+    def __init__(self, allow_external: bool, inner: httpx.AsyncBaseTransport | None = None) -> None:
+        self._allow_external = allow_external
+        self._inner = inner or httpx.AsyncHTTPTransport(trust_env=False)
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if not self._allow_external and request.url.host:
+            loop = asyncio.get_running_loop()
+            try:
+                infos = await loop.getaddrinfo(request.url.host, None, type=socket.SOCK_STREAM)
+            except OSError as exc:
+                raise LLMConnectionError(
+                    "LLMサーバーに接続できません。Base URLとサーバー状態を確認してください。"
+                ) from exc
+            addresses = [ipaddress.ip_address(item[4][0]) for item in infos]
+            if not addresses or not all(_is_local_address(address) for address in addresses):
+                raise LLMConnectionError(
+                    "Base URLはローカルネットワーク内のアドレスにしてください。"
+                )
+            # Pin the validated address: connect to it directly so a later
+            # DNS answer cannot change the destination. The pre-built request
+            # keeps its original Host header for virtual-hosted servers.
+            request.url = request.url.copy_with(host=str(addresses[0]))
+        return await self._inner.handle_async_request(request)
+
+    async def aclose(self) -> None:
+        await self._inner.aclose()
 
 
 class SecretCipher:
@@ -84,8 +167,11 @@ class LocalLLMClient:
         self.timeout_seconds = timeout_seconds
         self.transport = transport
 
+    def _transport_for(self, allow_external: bool) -> httpx.AsyncBaseTransport:
+        return LocalOnlyTransport(allow_external, inner=self.transport)
+
     @staticmethod
-    def normalize_base_url(base_url: str) -> str:
+    def normalize_base_url(base_url: str, allow_external: bool = False) -> str:
         normalized = base_url.strip().rstrip("/")
         parsed = urlsplit(normalized)
         if (
@@ -97,6 +183,11 @@ class LocalLLMClient:
             or parsed.fragment
         ):
             raise ValueError("Base URLには有効なhttpまたはhttpsのURLを指定してください。")
+        if not allow_external and not _is_local_target(parsed.hostname):
+            raise ValueError(
+                "Base URLはローカルネットワーク内のアドレスにしてください。"
+                "外部APIを使用する場合はLLM_ALLOW_EXTERNAL=trueを有効にしてください。"
+            )
         return normalized
 
     @staticmethod
@@ -106,10 +197,12 @@ class LocalLLMClient:
             headers["Authorization"] = f"Bearer {api_key}"
         return headers
 
-    async def list_models(self, base_url: str, api_key: str = "") -> list[dict[str, str]]:
-        normalized = self.normalize_base_url(base_url)
+    async def list_models(self, base_url: str, api_key: str = "", allow_external: bool = False) -> list[dict[str, str]]:
+        normalized = self.normalize_base_url(base_url, allow_external)
         try:
-            async with httpx.AsyncClient(timeout=10.0, trust_env=False, transport=self.transport) as client:
+            async with httpx.AsyncClient(
+                timeout=10.0, trust_env=False, transport=self._transport_for(allow_external)
+            ) as client:
                 response = await client.get(f"{normalized}/models", headers=self._headers(api_key))
                 response.raise_for_status()
                 models = parse_models(response.json())
@@ -144,8 +237,9 @@ class LocalLLMClient:
         api_key: str,
         context: dict[str, Any],
         system_prompt: str = DEFAULT_LLM_SYSTEM_PROMPT,
+        allow_external: bool = False,
     ) -> str:
-        normalized = self.normalize_base_url(base_url)
+        normalized = self.normalize_base_url(base_url, allow_external)
         payload = {
             "model": model,
             "messages": [
@@ -162,7 +256,9 @@ class LocalLLMClient:
         }
         try:
             async with httpx.AsyncClient(
-                timeout=self.timeout_seconds, trust_env=False, transport=self.transport
+                timeout=self.timeout_seconds,
+                trust_env=False,
+                transport=self._transport_for(allow_external),
             ) as client:
                 response = await client.post(
                     f"{normalized}/chat/completions", headers=self._headers(api_key), json=payload
@@ -227,6 +323,12 @@ class LLMReporter:
         values = await self.database.llm_settings()
         if not values.get("system_prompt", "").strip():
             await self.database.update_llm_settings({"system_prompt": self.settings.llm_system_prompt})
+        if values.get("base_url"):
+            try:
+                self.client.normalize_base_url(values["base_url"], self.settings.llm_allow_external)
+            except ValueError as exc:
+                # Never block app startup on the optional LLM feature; report the problem instead.
+                logger.warning("LLM Base URL is invalid: %s", exc)
 
     async def start(self) -> None:
         if self._running:
@@ -261,7 +363,9 @@ class LLMReporter:
         normalized = dict(updates)
         current = await self.database.llm_settings()
         if "base_url" in normalized:
-            normalized["base_url"] = self.client.normalize_base_url(str(normalized["base_url"]))
+            normalized["base_url"] = self.client.normalize_base_url(
+                str(normalized["base_url"]), self.settings.llm_allow_external
+            )
             if normalized["base_url"] != current["base_url"] and "api_key" not in normalized:
                 # A credential belongs to one endpoint. Moving to another host
                 # without entering a new key must not forward the old secret.
@@ -281,14 +385,21 @@ class LLMReporter:
 
     async def list_models(self, base_url: str, api_key: str | None = None) -> list[dict[str, str]]:
         saved = await self.database.llm_settings()
-        normalized = self.client.normalize_base_url(base_url)
-        saved_url = self.client.normalize_base_url(saved["base_url"]) if saved["base_url"] else ""
+        normalized = self.client.normalize_base_url(base_url, self.settings.llm_allow_external)
+        saved_url = ""
+        if saved["base_url"]:
+            try:
+                saved_url = self.client.normalize_base_url(saved["base_url"], self.settings.llm_allow_external)
+            except ValueError:
+                # The endpoint the key belongs to is no longer permitted (e.g.
+                # LLM_ALLOW_EXTERNAL was disabled); never match it again.
+                saved_url = ""
         # Never forward a persisted credential to a caller-supplied endpoint.
         # The saved key is reusable only for the exact endpoint it was saved with.
         credential = api_key.strip() if api_key is not None else (
             self.cipher.decrypt(saved["api_key_encrypted"]) if normalized == saved_url else ""
         )
-        return await self.client.list_models(normalized, credential)
+        return await self.client.list_models(normalized, credential, allow_external=self.settings.llm_allow_external)
 
     async def reports(self, limit: int = 10) -> list[dict[str, Any]]:
         return await self.database.llm_reports(limit)
@@ -317,7 +428,7 @@ class LLMReporter:
             try:
                 content = await self.client.create_report(
                     values["base_url"], values["model"], self.cipher.decrypt(values["api_key_encrypted"]),
-                    context, values["system_prompt"],
+                    context, values["system_prompt"], allow_external=self.settings.llm_allow_external,
                 )
             except Exception as exc:
                 error = str(exc)[:500]

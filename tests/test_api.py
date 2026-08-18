@@ -5,6 +5,7 @@ import hmac
 import json
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -44,7 +45,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'id="agentDeleteDialog"' in index.text
         assert "MANAGE" in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
-        assert '/static/styles.css?v=20260815-node-panel-overlap1' in index.text
+        assert '/static/styles.css?v=20260816-device-grid-2col' in index.text
         assert '/static/app.js?v=20260815-agent-uninstall1' in index.text
         assert "TRAFFIC LOW → SURGE" in index.text
         assert '<div class="health-value"><strong id="healthScore">--</strong></div>' in index.text
@@ -172,7 +173,7 @@ def test_demo_mode_produces_devices(tmp_path):
 
 
 def test_signed_agent_heartbeat(tmp_path):
-    token = "test-token-that-is-long-enough"
+    token = "test-token-that-is-long-enough-01"
     settings = Settings(
         data_dir=tmp_path, collector_enabled=False, discovery_enabled=False, agent_token=token
     )
@@ -228,7 +229,7 @@ def test_signed_agent_heartbeat(tmp_path):
 
 
 def test_agent_rejects_bad_signature(tmp_path):
-    settings = Settings(data_dir=tmp_path, collector_enabled=False, agent_token="server-secret")
+    settings = Settings(data_dir=tmp_path, collector_enabled=False, agent_token="server-secret-32char-test-value-00")
     app = create_app(settings)
     with TestClient(app) as client:
         response = client.post(
@@ -380,17 +381,19 @@ def test_llm_settings_model_discovery_and_manual_report(tmp_path):
     )
     app = create_app(settings)
 
-    async def fake_list_models(base_url, api_key=""):
+    async def fake_list_models(base_url, api_key="", allow_external=False):
         assert base_url == "http://127.0.0.1:1234/v1"
         assert api_key == "secret-value"
+        assert allow_external is False
         return [{"id": "chat-model"}]
 
-    async def fake_report(base_url, model, api_key, context, system_prompt):
+    async def fake_report(base_url, model, api_key, context, system_prompt, allow_external=False):
         assert base_url == "http://127.0.0.1:1234/v1"
         assert model == "chat-model"
         assert api_key == "secret-value"
         assert context["samples"]["sample_count"] == 1
         assert system_prompt == "必ず日本語で報告してください。"
+        assert allow_external is False
         return "総評\nネットワークは正常です。"
 
     with TestClient(app) as client:
@@ -446,9 +449,10 @@ def test_llm_settings_model_discovery_and_manual_report(tmp_path):
         assert flavor_24h["label"] == "直近24時間分"
         assert client.put("/api/v1/llm/settings", json={"flavor_scope": "invalid"}).status_code == 422
 
-        async def fake_other_models(base_url, api_key=""):
+        async def fake_other_models(base_url, api_key="", allow_external=False):
             assert base_url == "http://192.168.10.99:1234/v1"
             assert api_key == ""
+            assert allow_external is False
             return []
 
         app.state.llm_reporter.client.list_models = fake_other_models
@@ -474,3 +478,123 @@ def test_llm_settings_reject_credentials_in_base_url(tmp_path):
         )
         assert response.status_code == 400
         assert "password" not in response.text
+
+
+def test_agent_heartbeat_rejects_non_ascii_signature(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path,
+        collector_enabled=False,
+        discovery_enabled=False,
+        agent_token="server-secret-32char-test-value-01",
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/agent/heartbeat",
+            content=b"{}",
+            # A signature carrying raw high bytes decodes to a non-ASCII string on
+            # the server and used to hit an unhandled TypeError (HTTP 500).
+            # It must now be rejected as an invalid signature (HTTP 401).
+            headers={
+                "X-Agent-Timestamp": str(int(time.time())),
+                "X-Agent-Signature": b"bad-\xe9",
+            },
+        )
+        assert response.status_code == 401
+
+
+def test_agent_heartbeat_rejects_non_numeric_timestamp(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path,
+        collector_enabled=False,
+        discovery_enabled=False,
+        agent_token="server-secret-32char-test-value-01",
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/agent/heartbeat",
+            content=b"{}",
+            headers={
+                # Raw high bytes must not reach int()/ascii-encode as a 500.
+                "X-Agent-Timestamp": b"\xd9\xa1\xd9\xa2",
+                "X-Agent-Signature": "bad",
+            },
+        )
+        assert response.status_code == 401
+
+
+def test_agent_heartbeat_rejects_replay_within_timestamp_window(tmp_path):
+    token = "agent-replay-test-32char-token-v1"
+    settings = Settings(
+        data_dir=tmp_path,
+        collector_enabled=False,
+        discovery_enabled=False,
+        agent_token=token,
+    )
+    app = create_app(settings)
+    payload = {
+        "node_id": "node-replay", "hostname": "replay-host", "os_name": "Linux",
+        "cpu_percent": 1.0, "memory_percent": 1.0, "disk_percent": 1.0,
+        "load_1m": 0.1, "process_count": 10, "uptime_seconds": 10,
+        "rx_bps": 1.0, "tx_bps": 1.0,
+        "socket_count": 1, "established_socket_count": 0, "listening_socket_count": 0,
+    }
+    body = json.dumps(payload, separators=(",", ":")).encode()
+    timestamp = str(int(time.time()))
+    signature = hmac.new(token.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+    headers = {
+        "Content-Type": "application/json",
+        "X-Agent-Timestamp": timestamp,
+        "X-Agent-Signature": signature,
+    }
+    with TestClient(app) as client:
+        first = client.post("/api/v1/agent/heartbeat", content=body, headers=headers)
+        assert first.status_code == 200
+        # The 60s timestamp window alone would allow replaying the captured
+        # request; an identical (timestamp, payload) MAC must be rejected.
+        replay = client.post("/api/v1/agent/heartbeat", content=body, headers=headers)
+        assert replay.status_code == 401
+        assert "Duplicate" in replay.text
+
+
+def test_create_app_rejects_weak_agent_token(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path,
+        collector_enabled=False,
+        discovery_enabled=False,
+        agent_token="way-too-short",
+    )
+    with pytest.raises(RuntimeError, match="AGENT_TOKEN"):
+        create_app(settings)
+
+
+def test_llm_base_url_rejects_external_by_default(tmp_path):
+    settings = Settings(data_dir=tmp_path, collector_enabled=False, discovery_enabled=False)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        update = client.put("/api/v1/llm/settings", json={"base_url": "https://api.openai.com/v1"})
+        assert update.status_code == 400
+        # The URL itself must not be echoed back into the error.
+        assert "openai" not in update.text
+        models = client.post("/api/v1/llm/models", json={"base_url": "https://api.openai.com/v1"})
+        assert models.status_code == 400
+        # Cloud-metadata link-local addresses are never a valid LLM target.
+        meta = client.post("/api/v1/llm/models", json={"base_url": "http://169.254.169.254/latest/meta-data/"})
+        assert meta.status_code == 400
+
+
+def test_llm_base_url_allows_external_when_flagged(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path,
+        collector_enabled=False,
+        discovery_enabled=False,
+        llm_allow_external=True,
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        update = client.put("/api/v1/llm/settings", json={"base_url": "https://api.openai.com/v1"})
+        assert update.status_code == 200
+        assert update.json()["base_url"] == "https://api.openai.com/v1"
+        settings_payload = client.get("/api/v1/llm/settings").json()
+        assert settings_payload["base_url"] == "https://api.openai.com/v1"
