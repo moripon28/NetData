@@ -185,7 +185,7 @@
     let cardLimit = 5;
     let cardVisibleIds = new Set();
     const labels = new Map();
-    const ALWAYS_VISIBLE_ROLES = new Set(["gateway", "qnap", "device-group"]);
+    const ALWAYS_VISIBLE_ROLES = new Set(["qnap", "device-group"]);
     const gl = canvas.getContext("webgl", { alpha: true, antialias: true, premultipliedAlpha: false, powerPreference: "high-performance" });
     const context2d = gl ? null : canvas.getContext("2d");
     let lineProgram = null;
