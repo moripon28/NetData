@@ -311,7 +311,7 @@
   <dialog id="topologyCardSettingsDialog" class="settings-dialog">
     <form id="topologyCardSettingsForm">
       <div class="dialog-head"><div><small>CONSTELLATION DISPLAY</small><h2>ノードカードの表示設定</h2></div><button id="topologyCardSettingsClose" type="button" aria-label="閉じる">×</button></div>
-      <p class="form-hint">星図に表示するノードカードを選択できます。監視ノード(RP5)、ゲートウェイ、NAS(QNAP)、デバイスグループは常にカードが表示されます。「上位Nノードのみ」では、通信量・CPU使用率・ソケット数から算出した活発度が高いノードから順に最大N件のカードを表示し、ライブで並び替えられます。</p>
+      <p class="form-hint">星図に表示するノードカードを選択できます。ゲートウェイ、NAS(QNAP)、デバイスグループは常にカードが表示されます。監視ノード(RP5)のカードは上位Nノードに含まれないときは非表示になりますが、ノードをクリックすると表示されます。「上位Nノードのみ」では、通信量・CPU使用率・ソケット数から算出した活発度が高いノードから順に最大N件のカードを表示し、ライブで並び替えられます。</p>
       <div class="form-grid">
         <label>表示モード<select id="topologyCardMode"><option value="top">上位Nノードのみ表示</option><option value="all">すべてのノードカードを表示</option></select></label>
         <label>表示するノード数(N)<select id="topologyCardLimit"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select></label>
