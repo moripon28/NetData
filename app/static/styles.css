@@ -87,6 +87,7 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 .topology-head-status { display: flex; align-items: center; gap: 13px; }
 .render-mode { color: var(--cyan); border: 1px solid rgba(76,231,219,.2); padding: 5px 7px; font: 7px var(--mono); letter-spacing: .1em; }
 .render-mode.fallback { color: var(--orange); border-color: rgba(255,182,92,.26); }
+.topology-head-action { border: 1px solid rgba(76,231,219,.24); background: rgba(76,231,219,.055); color: var(--cyan); padding: 5px 8px; font: 7px var(--mono); letter-spacing: .1em; cursor: pointer; }.topology-head-action:hover { border-color: rgba(76,231,219,.46); background: rgba(76,231,219,.13); }
 .topology-label-layer { position: absolute; inset: 0; z-index: 6; pointer-events: none; }
 .topology-node-label { --node-color: 156,255,206; --leader-left: 0px; --leader-top: 50%; --leader-length: 14px; --leader-angle: 3.1416rad; position: absolute; width: max-content; max-width: calc(180 * var(--ui-font-unit)); min-width: calc(96 * var(--ui-font-unit)); padding: 7px 9px 6px; text-align: left; color: var(--text); border: 1px solid rgba(var(--node-color), .22); border-left: 2px solid rgba(var(--node-color), .85); background: linear-gradient(90deg, rgba(5,18,18,.92), rgba(5,12,13,.7)); backdrop-filter: blur(8px); pointer-events: auto; cursor: grab; touch-action: none; font-family: var(--mono); transition: opacity .2s, border-color .2s, background .2s; }
 .topology-stage.is-dragging .topology-node-label { cursor: grabbing; }
@@ -96,6 +97,7 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 .topology-node-label.is-offline { --node-color: 102,117,111; }
 .topology-node-label.is-warning { --node-color: 255,182,92; }
 .topology-node-label.is-group { border-style: dashed; background: linear-gradient(90deg, rgba(var(--node-color), .09), rgba(5,12,13,.78)); }
+.topology-node-label.is-card-hidden { display: none; }
 .topology-node-label .node-label-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .topology-node-label .node-label-title strong { max-width: calc(125 * var(--ui-font-unit)); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; letter-spacing: .06em; }
 .topology-node-label .node-label-title i { width: 5px; height: 5px; flex: 0 0 auto; border-radius: 50%; background: rgb(var(--node-color)); box-shadow: 0 0 8px rgba(var(--node-color), .8); }
@@ -234,13 +236,13 @@ dialog { width: min(460px, calc(100% - 30px)); color: var(--text); background: #
 }
 @media (max-width: 650px) { .llm-flavor-stream { display: none; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; } }
-dialog textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px solid var(--line); background: #07100e; color: var(--text); padding: 11px; font: 12px/1.6 var(--sans); outline: 0; } dialog textarea:focus { border-color: rgba(156,255,206,.5); }
+dialog textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px solid var(--line); background: #07100e; color: var(--text); padding: 11px; font: 12px/1.6 var(--sans); outline: 0; } dialog textarea:focus { border-color: rgba(156,255,206,.5); } dialog select:disabled { opacity: .45; cursor: not-allowed; }
 
 /* Readability scale: medium is the default and intentionally larger than the original dense HUD type. */
 .topology-inspector::before, .topology-inspector header small, .node-state,
 .topology-node-metrics small, .topology-inspector button { font-size: calc(7 * var(--ui-font-unit)); }
 .brand small, .topbar-action, .font-size-control > span, .intro-signal, .panel-index,
-.panel-actions select, .panel-button, .render-mode, .topology-node-label > small,
+.panel-actions select, .panel-button, .render-mode, .topology-head-action, .topology-node-label > small,
 .node-label-metrics span, .topology-scene-meta, .topology-inspector header span,
 .topology-legend, .health-value small, .chart-axis, .system-metric small,
 .horizon-title small, .mini-status, .horizon-values span, .agent-node,

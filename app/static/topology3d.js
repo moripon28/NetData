@@ -180,7 +180,11 @@
     let dragStart = null;
     let dragDistance = 0;
     let projectedNodes = [];
+    let cardMode = "all";
+    let cardLimit = 5;
+    let cardVisibleIds = new Set();
     const labels = new Map();
+    const ALWAYS_VISIBLE_ROLES = new Set(["core", "gateway", "qnap", "device-group"]);
     const gl = canvas.getContext("webgl", { alpha: true, antialias: true, premultipliedAlpha: false, powerPreference: "high-performance" });
     const context2d = gl ? null : canvas.getContext("2d");
     let lineProgram = null;
@@ -747,10 +751,32 @@
       frame = window.requestAnimationFrame(render);
     }
 
+    function computeCardVisibleIds() {
+      if (cardMode !== "top") return new Set(nodes.map((node) => node.id));
+      const visible = new Set(nodes.filter((node) => ALWAYS_VISIBLE_ROLES.has(node.role)).map((node) => node.id));
+      const ranked = [...nodes].sort((first, second) => (Number(second.activityLevel) || 0) - (Number(first.activityLevel) || 0) || String(first.id).localeCompare(String(second.id)));
+      ranked.slice(0, Math.max(1, cardLimit)).forEach((node) => visible.add(node.id));
+      if (selectedId) visible.add(selectedId);
+      return visible;
+    }
+
+    function syncCardVisibility() {
+      labels.forEach((label, id) => label.classList.toggle("is-card-hidden", !cardVisibleIds.has(id)));
+    }
+
+    function setCardConfig(mode, limit) {
+      cardMode = mode === "top" ? "top" : "all";
+      cardLimit = Math.min(32, Math.max(1, Math.round(Number(limit) || cardLimit)));
+      cardVisibleIds = computeCardVisibleIds();
+      syncCardVisibility();
+    }
+
     function select(id, notify = true) {
       const node = nodes.find((item) => item.id === id);
       if (!node) return;
       selectedId = id;
+      cardVisibleIds.add(id);
+      labels.get(id)?.classList.remove("is-card-hidden");
       labels.forEach((label, labelId) => label.classList.toggle("selected", labelId === id));
       if (notify) onSelect?.(node);
     }
@@ -780,6 +806,7 @@
         if (node.groupCount > 1) label.classList.add("is-group");
         if (["offline", "unreachable", "disabled", "unknown"].includes(String(node.status).toLowerCase())) label.classList.add("is-offline");
         if (["warning", "degraded", "checking", "learning"].includes(String(node.status).toLowerCase())) label.classList.add("is-warning");
+        if (!cardVisibleIds.has(node.id)) label.classList.add("is-card-hidden");
         label.setAttribute("aria-label", `${node.title} の情報を表示`);
         label.replaceChildren();
 
@@ -846,6 +873,7 @@
     function setNodes(nextNodes) {
       nodes = layoutNodes(nextNodes.map((node) => ({ ...node, metrics: [...(node.metrics || [])] })));
       if (!nodes.some((node) => node.id === selectedId)) selectedId = nodes.find((node) => node.role === "core")?.id || nodes[0]?.id || null;
+      cardVisibleIds = computeCardVisibleIds();
       buildLabels();
       if (selectedId) select(selectedId);
     }
@@ -930,6 +958,7 @@
     return {
       setNodes,
       select,
+      setCardConfig,
       resetCamera,
       get mode() { return webglReady ? "webgl" : "fallback"; },
       destroy() {

@@ -24,6 +24,10 @@
     topologyTrafficFlux: $("topologyTrafficFlux"), topologySocketCount: $("topologySocketCount"),
     topologyProcessCount: $("topologyProcessCount"), topologyLatencyReadout: $("topologyLatencyReadout"),
     topologyFrameRate: $("topologyFrameRate"), topologyObjectCount: $("topologyObjectCount"),
+    topologyCardSettingsButton: $("topologyCardSettingsButton"), topologyCardSettingsDialog: $("topologyCardSettingsDialog"),
+    topologyCardSettingsForm: $("topologyCardSettingsForm"), topologyCardSettingsClose: $("topologyCardSettingsClose"),
+    topologyCardSettingsCancel: $("topologyCardSettingsCancel"), topologyCardMode: $("topologyCardMode"),
+    topologyCardLimit: $("topologyCardLimit"), topologyCardSettingsStatus: $("topologyCardSettingsStatus"),
     llmFlavorStream: $("llmFlavorStream"), llmFlavorScope: $("llmFlavorScope"),
     llmFlavorViewport: $("llmFlavorViewport"), llmFlavorContent: $("llmFlavorContent"),
     llmFlavorCursor: $("llmFlavorCursor"), llmFlavorStatus: $("llmFlavorStatus"),
@@ -60,10 +64,13 @@
     llmClearApiKey: $("llmClearApiKey"), llmSettingsStatus: $("llmSettingsStatus"),
   };
 
+  const topologyCardsKey = "netpulse.topologyCards";
+  const topologyCardLimits = 10;
   const state = {
     snapshot: null, devices: [], rx: [], tx: [], filter: "all", search: "", selectedIp: null,
     trafficSelection: "all", trafficSources: [], trafficSeries: {}, trafficTabSignature: "", trafficWindowMinutes: 5,
     topologyNodes: [], topologyScene: null, selectedTopologyNode: null,
+    topologyCardSettings: loadTopologyCardSettings(),
     socket: null, reconnectTimer: null, reports: [], llmSettings: null, agents: [], selectedAgent: null,
     flavorSignature: "", flavorGeneration: 0,
   };
@@ -73,6 +80,14 @@
   const maxPoints = 60;
   const topologyNodeLimit = 18;
   const offlineGroupMinimum = 4;
+  function loadTopologyCardSettings() {
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(topologyCardsKey) || "null");
+      const mode = parsed && (parsed.mode === "top" || parsed.mode === "all") ? parsed.mode : "top";
+      const limit = Math.min(topologyCardLimits, Math.max(1, Math.round(Number(parsed && parsed.limit) || 5)));
+      return { mode, limit };
+    } catch (_) { return { mode: "top", limit: 5 }; }
+  }
   const inactiveTopologyStatuses = new Set(["offline", "unreachable", "unknown", "disabled"]);
   const typeIcons = { router: "⌁", computer: "▣", phone: "▯", tablet: "▭", tv: "▰", iot: "◇", server: "▤", printer: "▥", camera: "◉", game: "✦", unknown: "?" };
 
@@ -608,6 +623,29 @@
     elements.topologyProfileButton.hidden = node.kind !== "device" || !node.ip;
   }
 
+  function applyTopologyCardSettings() {
+    const { mode, limit } = state.topologyCardSettings;
+    state.topologyScene?.setCardConfig(mode, limit);
+    elements.topologyCardSettingsButton.textContent = mode === "all" ? "CARDS: ALL" : `CARDS: TOP ${limit}`;
+  }
+
+  function syncTopologyCardLimitField() {
+    elements.topologyCardLimit.disabled = elements.topologyCardMode.value === "all";
+  }
+
+  function openTopologyCardSettings() {
+    const { mode, limit } = state.topologyCardSettings;
+    elements.topologyCardMode.value = mode;
+    elements.topologyCardLimit.value = String(limit);
+    syncTopologyCardLimitField();
+    elements.topologyCardSettingsStatus.textContent = "";
+    elements.topologyCardSettingsDialog.showModal();
+  }
+
+  function closeTopologyCardSettings() {
+    elements.topologyCardSettingsDialog.close();
+  }
+
   function updateTopologyNodes() {
     const snapshot = state.snapshot || {};
     const system = snapshot.system || {};
@@ -977,6 +1015,22 @@
   elements.topologyProfileButton.addEventListener("click", () => {
     if (state.selectedTopologyNode?.ip) openDevice(state.selectedTopologyNode.ip);
   });
+  elements.topologyCardSettingsButton.addEventListener("click", openTopologyCardSettings);
+  elements.topologyCardSettingsClose.addEventListener("click", closeTopologyCardSettings);
+  elements.topologyCardSettingsCancel.addEventListener("click", closeTopologyCardSettings);
+  elements.topologyCardMode.addEventListener("change", syncTopologyCardLimitField);
+  elements.topologyCardSettingsForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const settings = {
+      mode: elements.topologyCardMode.value === "top" ? "top" : "all",
+      limit: Math.min(topologyCardLimits, Math.max(1, Number(elements.topologyCardLimit.value) || 1)),
+    };
+    state.topologyCardSettings = settings;
+    try { localStorage.setItem(topologyCardsKey, JSON.stringify(settings)); } catch (_) { /* Storage can be disabled. */ }
+    applyTopologyCardSettings();
+    elements.topologyCardSettingsStatus.textContent = "設定を保存しました。星図に即適用されました。";
+    window.setTimeout(closeTopologyCardSettings, 650);
+  });
   elements.agentSetupButton.addEventListener("click", openAgentSetup);
   document.querySelectorAll("[data-agent-setup-mode]").forEach((button) => button.addEventListener("click", () => setAgentSetupMode(button.dataset.agentSetupMode)));
   elements.agentManageButton.addEventListener("click", openAgentManager);
@@ -1080,6 +1134,7 @@
     elements.topologyRenderMode.className = "render-mode fallback";
     elements.topologyRenderMode.textContent = "RENDERER · OFFLINE";
   }
+  applyTopologyCardSettings();
 
   window.setInterval(() => { elements.clock.textContent = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date()); }, 1000);
   window.setInterval(() => { if (state.socket?.readyState === WebSocket.OPEN) state.socket.send("ping"); }, 20000);

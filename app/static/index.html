@@ -17,7 +17,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=20260816-device-grid-2col">
+  <link rel="stylesheet" href="/static/styles.css?v=20260818-card-settings">
 </head>
 <body>
   <div class="ambient ambient-a" aria-hidden="true"></div>
@@ -54,7 +54,7 @@
       <article class="panel topology-panel">
         <header class="panel-head">
           <div><span class="panel-index">01</span><h2>NETWORK CONSTELLATION</h2><span class="panel-kicker">RAW WEBGL · SPATIAL TELEMETRY</span></div>
-          <div class="topology-head-status"><span class="render-mode" id="topologyRenderMode">WEBGL · STARTING</span><span class="subnet-label" id="subnetLabel">SUBNET · DETECTING</span></div>
+          <div class="topology-head-status"><button class="topology-head-action" id="topologyCardSettingsButton" type="button" title="ノードカードの表示設定">CARDS: TOP 5</button><span class="render-mode" id="topologyRenderMode">WEBGL · STARTING</span><span class="subnet-label" id="subnetLabel">SUBNET · DETECTING</span></div>
         </header>
         <div class="topology-stage" id="topologyStage">
           <div class="topology-volume" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -308,6 +308,20 @@
     </form>
   </dialog>
 
+  <dialog id="topologyCardSettingsDialog" class="settings-dialog">
+    <form id="topologyCardSettingsForm">
+      <div class="dialog-head"><div><small>CONSTELLATION DISPLAY</small><h2>ノードカードの表示設定</h2></div><button id="topologyCardSettingsClose" type="button" aria-label="閉じる">×</button></div>
+      <p class="form-hint">星図に表示するノードカードを選択できます。監視ノード(RP5)、ゲートウェイ、NAS(QNAP)、デバイスグループは常にカードが表示されます。「上位Nノードのみ」では、通信量・CPU使用率・ソケット数から算出した活発度が高いノードから順に最大N件のカードを表示し、ライブで並び替えられます。</p>
+      <div class="form-grid">
+        <label>表示モード<select id="topologyCardMode"><option value="top">上位Nノードのみ表示</option><option value="all">すべてのノードカードを表示</option></select></label>
+        <label>表示するノード数(N)<select id="topologyCardLimit"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option></select></label>
+      </div>
+      <p class="form-hint">カードが非表示のノードも3D空間には残ります。ノード本体をクリックすると、そのノードのカードを表示して左下の SELECTED NODE に詳細を表示します。</p>
+      <p class="form-status" id="topologyCardSettingsStatus" role="status"></p>
+      <div class="dialog-actions"><button id="topologyCardSettingsCancel" type="button" class="cancel">CANCEL</button><button type="submit" class="save">SAVE SETTINGS</button></div>
+    </form>
+  </dialog>
+
   <dialog id="llmSettingsDialog" class="settings-dialog">
     <form id="llmSettingsForm">
       <div class="dialog-head"><div><small>LOCAL AI SETTINGS</small><h2>ネットワーク報告</h2></div><button id="llmSettingsClose" type="button" aria-label="閉じる">×</button></div>
@@ -331,7 +345,7 @@
     </form>
   </dialog>
 
-  <script src="/static/topology3d.js?v=20260815-node-panel-overlap1" defer></script>
-  <script src="/static/app.js?v=20260815-agent-uninstall1" defer></script>
+  <script src="/static/topology3d.js?v=20260818-card-settings" defer></script>
+  <script src="/static/app.js?v=20260818-card-settings" defer></script>
 </body>
 </html>

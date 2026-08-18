@@ -30,8 +30,8 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "EASY SETUP" in index.text
         assert "RAW WEBGL" in index.text
         assert "SPATIAL TELEMETRY" in index.text
-        assert 'src="/static/topology3d.js?v=20260815-node-panel-overlap1"' in index.text
-        assert 'src="/static/app.js?v=20260815-agent-uninstall1"' in index.text
+        assert 'src="/static/topology3d.js?v=20260818-card-settings"' in index.text
+        assert 'src="/static/app.js?v=20260818-card-settings"' in index.text
         assert 'data-font-size="small"' in index.text
         assert 'data-font-size="medium"' in index.text
         assert 'data-font-size="large"' in index.text
@@ -43,10 +43,14 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'id="llmFlavorScope"' in index.text
         assert 'id="agentManageDialog"' in index.text
         assert 'id="agentDeleteDialog"' in index.text
+        assert 'id="topologyCardSettingsButton"' in index.text
+        assert 'id="topologyCardSettingsDialog"' in index.text
+        assert 'id="topologyCardMode"' in index.text
+        assert 'id="topologyCardLimit"' in index.text
         assert "MANAGE" in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
-        assert '/static/styles.css?v=20260816-device-grid-2col' in index.text
-        assert '/static/app.js?v=20260815-agent-uninstall1' in index.text
+        assert '/static/styles.css?v=20260818-card-settings' in index.text
+        assert '/static/app.js?v=20260818-card-settings' in index.text
         assert "TRAFFIC LOW → SURGE" in index.text
         assert '<div class="health-value"><strong id="healthScore">--</strong></div>' in index.text
         assert "<small>HEALTH</small>" not in index.text
@@ -72,6 +76,9 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "trafficTargetId" in topology_script.text
         assert "node-flow-readout" in topology_script.text
         assert "compactRateLabel" in topology_script.text
+        assert "setCardConfig" in topology_script.text
+        assert "computeCardVisibleIds" in topology_script.text
+        assert '"is-card-hidden"' in topology_script.text
 
         app_script = client.get("/static/app.js")
         assert app_script.status_code == 200
@@ -88,6 +95,9 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "uninstall-windows.ps1" in app_script.text
         assert "uninstall-linux.sh" in app_script.text
         assert 'copied ? "COPIED" : "SELECT TEXT"' in app_script.text
+        assert "netpulse.topologyCards" in app_script.text
+        assert "loadTopologyCardSettings" in app_script.text
+        assert "setCardConfig" in app_script.text
 
         styles = client.get("/static/styles.css")
         assert styles.status_code == 200
@@ -113,6 +123,8 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "@media (min-width: 1921px)" in styles.text
         assert ".dashboard { width: clamp(1680px, calc(100% - 320px), 3200px); }" in styles.text
         assert ".command-deck { grid-template-columns: minmax(0, 1fr) clamp(420px, 20vw, 560px); }" in styles.text
+        assert ".topology-node-label.is-card-hidden { display: none; }" in styles.text
+        assert ".topology-head-action" in styles.text
 
         metrics = client.get("/metrics")
         assert metrics.status_code == 200
