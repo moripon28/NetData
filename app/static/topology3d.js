@@ -18,6 +18,7 @@
   const MAX_PITCH = 1.05;
   const LABEL_MARGIN = 10;
   const LABEL_GAP = 7;
+  const LABEL_EASE_MS = 170;
   const INITIAL_DISTANCE = 8.2;
   const MIN_DISTANCE = 6.4;
   const MAX_DISTANCE = 12.8;
@@ -173,6 +174,7 @@
     let selectedId = null;
     let frame = 0;
     let lastFrameAt = 0;
+    let lastLabelAt = 0;
     let lastStatsAt = 0;
     let renderedFrames = 0;
     let yawOffset = INITIAL_YAW;
@@ -691,8 +693,11 @@
       label.style.setProperty("--leader-angle", `${Math.atan2(leaderY, leaderX)}rad`);
     }
 
-    function updateLabelPositions(size) {
+    function updateLabelPositions(size, now) {
       const stageRect = interactionSurface.getBoundingClientRect();
+      const deltaMs = lastLabelAt ? Math.min(250, Math.max(0, now - lastLabelAt)) : 0;
+      lastLabelAt = now;
+      const smoothing = reducedMotion.matches ? 1 : 1 - Math.exp(-deltaMs / LABEL_EASE_MS);
       const ordered = projectedNodes
         .filter(({ projected }) => projected.visible)
         .sort((first, second) => {
@@ -725,11 +730,23 @@
         const placement = findLabelPlacement(anchor, width, height, size, occupied, reserved, label._layoutPosition);
         if (!placement) return;
         label._layoutPosition = { x: placement.x, y: placement.y };
-        label.style.left = `${placement.x}px`;
-        label.style.top = `${placement.y}px`;
+        if (!label._placedPosition) label._placedPosition = { x: anchor.x - width / 2, y: anchor.y - height / 2 };
+        const placed = label._placedPosition;
+        placed.x += (placement.x - placed.x) * smoothing;
+        placed.y += (placement.y - placed.y) * smoothing;
+        if (Math.abs(placed.x - placement.x) < 0.1) placed.x = placement.x;
+        if (Math.abs(placed.y - placement.y) < 0.1) placed.y = placement.y;
+        const currentPlacement = {
+          ...placement,
+          x: placed.x,
+          y: placed.y,
+          rect: { left: placed.x, top: placed.y, right: placed.x + width, bottom: placed.y + height },
+        };
+        label.style.left = `${placed.x}px`;
+        label.style.top = `${placed.y}px`;
         label.style.zIndex = String(node.id === selectedId ? 1100 : Math.round(1000 - projected.depth * 50));
-        updateLabelLeader(label, placement, anchor, width, height);
-        occupied.push(placement.rect);
+        updateLabelLeader(label, currentPlacement, anchor, width, height);
+        occupied.push(currentPlacement.rect);
       });
     }
 
@@ -739,7 +756,7 @@
         const size = dimensions();
         const scene = buildScene(now, size);
         if (webglReady) drawWebgl(scene, size, now); else drawFallback(scene, size);
-        updateLabelPositions(size);
+        updateLabelPositions(size, now);
         renderedFrames += 1;
         if (!lastStatsAt) lastStatsAt = now;
         if (now - lastStatsAt >= 1000) {

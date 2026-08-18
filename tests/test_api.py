@@ -30,7 +30,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "EASY SETUP" in index.text
         assert "RAW WEBGL" in index.text
         assert "SPATIAL TELEMETRY" in index.text
-        assert 'src="/static/topology3d.js?v=20260818-card-settings"' in index.text
+        assert 'src="/static/topology3d.js?v=20260818-card-slide"' in index.text
         assert 'src="/static/app.js?v=20260818-xlarge"' in index.text
         assert 'data-font-size="small"' in index.text
         assert 'data-font-size="medium"' in index.text
@@ -65,6 +65,8 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert '".topology-inspector"' not in topology_script.text
         assert "collidesWithCard" in topology_script.text
         assert "collidesWithReserved" in topology_script.text
+        assert "LABEL_EASE_MS" in topology_script.text
+        assert "_placedPosition" in topology_script.text
         assert "appendCandidate" in topology_script.text
         assert "createSphereMesh" in topology_script.text
         assert "meshVertex" in topology_script.text
