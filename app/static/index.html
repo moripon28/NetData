@@ -8,7 +8,7 @@
   <title>NetPulse // Home Network Observatory</title>
   <script>
     (() => {
-      const sizes = ["small", "medium", "large"];
+      const sizes = ["small", "medium", "large", "xlarge"];
       try {
         const stored = localStorage.getItem("netpulse.fontSize");
         document.documentElement.dataset.fontSize = sizes.includes(stored) ? stored : "medium";
@@ -17,7 +17,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=20260818-card-settings">
+  <link rel="stylesheet" href="/static/styles.css?v=20260818-flavor">
 </head>
 <body>
   <div class="ambient ambient-a" aria-hidden="true"></div>
@@ -35,6 +35,7 @@
         <button type="button" data-font-size="small" aria-label="文字サイズ 小">小</button>
         <button type="button" data-font-size="medium" aria-label="文字サイズ 中">中</button>
         <button type="button" data-font-size="large" aria-label="文字サイズ 大">大</button>
+        <button type="button" data-font-size="xlarge" aria-label="文字サイズ 特大">特大</button>
       </div>
       <button class="topbar-action" id="llmSettingsButton" type="button">LLM SETTINGS</button>
       <div class="live-pill" id="connectionPill"><span></span><b>CONNECTING</b></div>
@@ -346,6 +347,6 @@
   </dialog>
 
   <script src="/static/topology3d.js?v=20260818-card-settings" defer></script>
-  <script src="/static/app.js?v=20260818-card-settings" defer></script>
+  <script src="/static/app.js?v=20260818-xlarge" defer></script>
 </body>
 </html>

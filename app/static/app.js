@@ -75,7 +75,7 @@
     flavorSignature: "", flavorGeneration: 0,
   };
   const fontSizeKey = "netpulse.fontSize";
-  const fontSizes = new Set(["small", "medium", "large"]);
+  const fontSizes = new Set(["small", "medium", "large", "xlarge"]);
   const fontSizeButtons = [...document.querySelectorAll("[data-font-size]")];
   const maxPoints = 60;
   const topologyNodeLimit = 18;
