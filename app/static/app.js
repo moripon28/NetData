@@ -578,6 +578,20 @@
     return clamp(0.08 + traffic * 0.55 + cpu * 0.22 + sockets * 0.15, 0.08, 1);
   }
 
+  function topologyLoadLevel(node) {
+    const weighted = [
+      [finiteNumber(node.cpuPercent), 0.5],
+      [finiteNumber(node.memoryPercent), 0.3],
+      [finiteNumber(node.diskPercent), 0.2],
+    ].filter(([value]) => value != null);
+    if (!weighted.length) return null;
+    const [total, scale] = weighted.reduce(
+      ([sum, weightTotal], [value, weight]) => [sum + clamp(value, 0, 100) * weight, weightTotal + weight],
+      [0, 0],
+    );
+    return scale ? clamp(total / (scale * 100), 0, 1) : null;
+  }
+
   function topologyTrafficLevel(rxBps, txBps) {
     const rate = Math.max(0, finiteNumber(rxBps) || 0) + Math.max(0, finiteNumber(txBps) || 0);
     if (!rate) return 0;
@@ -661,6 +675,7 @@
       id: "core:rp5", role: "core", kind: "system", status: coreStatus,
       title: "RP5 OBSERVER", subtitle: `${String(network.interface || "LOCAL NODE").toUpperCase()} · ${summary.subnet || "SUBNET DETECTING"}`,
       linkType: "LOCAL", socketCount: finiteNumber(system.socket_count), cpuPercent: finiteNumber(system.cpu_percent),
+      memoryPercent: finiteNumber(system.memory_percent), diskPercent: finiteNumber(system.disk_percent),
       ...coreTraffic,
       metrics: compactMetrics(
         percentMetric("CPU", system.cpu_percent), percentMetric("MEM", system.memory_percent),
@@ -706,7 +721,7 @@
       nodes.push({
         id: `qnap:${qnap.target || index}`, role: "qnap", kind: "qnap", status: warnings ? "degraded" : (qnap.status || "online"),
         title: identity.hostname || identity.model || "QNAP NAS", subtitle: [identity.model, qnap.target].filter(Boolean).join(" · "),
-        linkType: "SNMP", rxBps: 0, txBps: 0, cpuPercent: finiteNumber(qnapSystem.cpu_percent),
+        linkType: "SNMP", rxBps: 0, txBps: 0, cpuPercent: finiteNumber(qnapSystem.cpu_percent), memoryPercent,
         metrics: compactMetrics(
           percentMetric("CPU", qnapSystem.cpu_percent), percentMetric("MEM", memoryPercent),
           temperatureMetric("CPU TEMP", qnapSystem.cpu_temperature_celsius),
@@ -725,6 +740,7 @@
         title: host.hostname || host.node_id || role.toUpperCase(),
         subtitle: [host.os_name, ip].filter(Boolean).join(" · "),
         linkType: role === "agent" ? "AGENT" : "PROM", cpuPercent: finiteNumber(host.cpu_percent),
+        memoryPercent: finiteNumber(host.memory_percent), diskPercent: finiteNumber(host.disk_percent),
         socketCount: finiteNumber(host.socket_count), ...topologyTraffic(host.rx_bps, host.tx_bps),
         metrics: compactMetrics(
           percentMetric("CPU", host.cpu_percent), percentMetric("MEM", host.memory_percent),
@@ -799,7 +815,7 @@
     const gatewayNode = nodes.find((node) => node.role === "gateway");
     const activeNodes = nodes.map((node) => {
       const trafficTargetId = gatewayNode && node.role !== "gateway" && node.trafficMeasured ? gatewayNode.id : null;
-      return { ...node, trafficTargetId, activityLevel: topologyActivity(node) };
+      return { ...node, trafficTargetId, activityLevel: topologyActivity(node), loadLevel: topologyLoadLevel(node) };
     });
     state.topologyNodes = activeNodes;
     const liveCount = activeNodes.filter((node) => topologyStatusClass(node.status) === "online").length;

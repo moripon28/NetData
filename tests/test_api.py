@@ -30,8 +30,8 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "EASY SETUP" in index.text
         assert "RAW WEBGL" in index.text
         assert "SPATIAL TELEMETRY" in index.text
-        assert 'src="/static/topology3d.js?v=20260818-card-slide"' in index.text
-        assert 'src="/static/app.js?v=20260818-xlarge"' in index.text
+        assert 'src="/static/topology3d.js?v=20260819-load-pulse"' in index.text
+        assert 'src="/static/app.js?v=20260819-load-pulse"' in index.text
         assert 'data-font-size="small"' in index.text
         assert 'data-font-size="medium"' in index.text
         assert 'data-font-size="large"' in index.text
@@ -51,7 +51,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "MANAGE" in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
         assert '/static/styles.css?v=20260818-flavor' in index.text
-        assert '/static/app.js?v=20260818-xlarge' in index.text
+        assert '/static/app.js?v=20260819-load-pulse' in index.text
         assert "TRAFFIC LOW → SURGE" in index.text
         assert '<div class="health-value"><strong id="healthScore">--</strong></div>' in index.text
         assert "<small>HEALTH</small>" not in index.text
@@ -76,6 +76,8 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "updateLabelLeader" in topology_script.text
         assert "appendTrafficGlow" in topology_script.text
         assert "trafficColor" in topology_script.text
+        assert "loadColor" in topology_script.text
+        assert "loadBeat" in topology_script.text
         assert "trafficTargetId" in topology_script.text
         assert "node-flow-readout" in topology_script.text
         assert "compactRateLabel" in topology_script.text
@@ -91,6 +93,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "liveSocketNodes" in app_script.text
         assert 'role === "agent" ? "AGENT" : "PROM"' in app_script.text
         assert "topologyTrafficLevel" in app_script.text
+        assert "topologyLoadLevel" in app_script.text
         assert "trafficTargetId" in app_script.text
         assert "GATEWAYより先の経路は描画しません" in app_script.text
         assert 'method: "DELETE"' in app_script.text

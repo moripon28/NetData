@@ -50,6 +50,20 @@
     return mixColor(COLORS.orange, COLORS.danger, (intensity - 0.86) / 0.14);
   }
 
+  function loadColor(level) {
+    const intensity = clamp(Number(level) || 0, 0, 1);
+    if (intensity < 0.4) return mixColor(COLORS.mint, COLORS.cyan, intensity / 0.4);
+    if (intensity < 0.72) return mixColor(COLORS.cyan, COLORS.violet, (intensity - 0.4) / 0.32);
+    if (intensity < 0.88) return mixColor(COLORS.violet, COLORS.orange, (intensity - 0.72) / 0.16);
+    return mixColor(COLORS.orange, COLORS.danger, (intensity - 0.88) / 0.12);
+  }
+
+  function loadBeat(node) {
+    const load = clamp(Number(node && node.loadLevel) || 0, 0, 1);
+    const activity = clamp(Number(node && node.activityLevel) || 0.12, 0.05, 1);
+    return { load, speed: 0.0011 + activity * 0.0013 + load * 0.0042, amplitude: 0.05 + load * 0.1 };
+  }
+
   function trafficBand(level, rate) {
     if (!(Number(rate) > 0)) return "idle";
     if (level < 0.35) return "low";
@@ -401,8 +415,13 @@
       const points = [];
       const meshInstances = [];
       const ringColor = COLORS.cyan;
+      const hubNode = nodes.find((node) => node.isHub) || null;
+      const hubOffline = !hubNode || ["offline", "unreachable", "disabled", "unknown"].includes(String(hubNode.status).toLowerCase());
+      const hubLoad = hubOffline ? 0 : clamp(Number(hubNode.loadLevel) || 0, 0, 1);
+      const shellColor = hubLoad > 0 ? mixColor(COLORS.cyan, loadColor(hubLoad), 0.2 + hubLoad * 0.6) : COLORS.cyan;
+      const gridColor = hubLoad > 0 ? mixColor(COLORS.mint, loadColor(hubLoad), 0.2 + hubLoad * 0.6) : COLORS.mint;
 
-      const addWorldRing = (radius, axis, alpha, phase = 0) => {
+      const addWorldRing = (radius, axis, alpha, phase = 0, color = ringColor) => {
         const segments = 96;
         for (let index = 0; index < segments; index += 1) {
           const angles = [(index / segments) * TAU + phase, ((index + 1) / segments) * TAU + phase];
@@ -411,13 +430,13 @@
             if (axis === "yz") return [0, Math.cos(angle) * radius, Math.sin(angle) * radius];
             return [Math.cos(angle) * radius, 0, Math.sin(angle) * radius];
           });
-          appendLine(lines, project(worldPoints[0], view, size), project(worldPoints[1], view, size), ringColor, alpha);
+          appendLine(lines, project(worldPoints[0], view, size), project(worldPoints[1], view, size), color, alpha);
         }
       };
 
-      addWorldRing(1.02, "xy", 0.14);
-      addWorldRing(1.02, "yz", 0.11);
-      addWorldRing(1.02, "xz", 0.18);
+      addWorldRing(1.02, "xy", 0.14, 0, shellColor);
+      addWorldRing(1.02, "yz", 0.11, 0, shellColor);
+      addWorldRing(1.02, "xz", 0.18, 0, shellColor);
       addWorldRing(1.42, "xz", 0.12, now * 0.00008);
       addWorldRing(2.15, "xz", 0.075);
       addWorldRing(3.08, "xz", 0.055, 0.18);
@@ -436,7 +455,7 @@
         for (let index = 0; index < segments; index += 1) {
           const start = index / segments * TAU;
           const end = (index + 1) / segments * TAU;
-          appendLine(lines, project([Math.cos(start) * radius, y, Math.sin(start) * radius], view, size), project([Math.cos(end) * radius, y, Math.sin(end) * radius], view, size), COLORS.mint, 0.055);
+          appendLine(lines, project([Math.cos(start) * radius, y, Math.sin(start) * radius], view, size), project([Math.cos(end) * radius, y, Math.sin(end) * radius], view, size), gridColor, 0.055 + hubLoad * 0.05);
         }
       });
 
@@ -445,9 +464,11 @@
       const coreProjection = project([0, 0, 0], view, size);
 
       projectedNodes.forEach(({ node, projected }, index) => {
-        const color = statusColor(node);
         const offline = ["offline", "unreachable", "disabled", "unknown"].includes(String(node.status).toLowerCase());
         const activity = offline ? 0.02 : clamp(Number(node.activityLevel) || 0.12, 0.05, 1);
+        const { load, speed: beatSpeed, amplitude: beatAmplitude } = loadBeat(offline ? null : node);
+        const baseColor = statusColor(node);
+        const color = offline || !(load > 0) ? baseColor : mixColor(baseColor, loadColor(load), 0.22 + load * 0.74);
         if (!node.isHub) appendLine(lines, coreProjection, projected, color, offline ? 0.055 : 0.12);
 
         const trafficTarget = node.trafficTargetId ? projectedById.get(node.trafficTargetId) : null;
@@ -484,7 +505,7 @@
         if (node.id === selectedId) appendScreenRing(lines, projected, baseSize * 0.72 * projected.scale, color, 0.78, size);
 
         const selected = node.id === selectedId;
-        const pulse = 1 + (reducedMotion.matches ? 0 : Math.sin(now * (0.0012 + activity * 0.0018) + index) * 0.06);
+        const pulse = 1 + (reducedMotion.matches ? 0 : Math.sin(now * beatSpeed + index) * beatAmplitude);
         const baseScale = node.role === "gateway" ? 0.45 : node.role === "qnap" ? 0.39 : ["agent", "core", "exporter"].includes(node.role) ? 0.31 : node.role === "device-group" ? 0.4 : 0.24;
         const scale = baseScale * pulse * (selected ? 1.25 : 1);
         meshInstances.push({
@@ -494,9 +515,24 @@
           spin: node.orbit + now * (reducedMotion.matches ? 0 : 0.00036) * (0.7 + index * 0.025),
           color,
           alpha: offline ? 0.2 : selected ? 0.96 : 0.72,
-          emissive: selected ? 0.82 : 0.34 + activity * 0.38,
+          emissive: selected ? 0.94 : clamp(0.32 + activity * 0.26 + load * 0.42, 0, 1),
         });
       });
+
+      if (hubNode && !hubOffline && !reducedMotion.matches && hubLoad > 0.03) {
+        const { speed: hubBeat } = loadBeat(hubNode);
+        const hubIndex = nodes.indexOf(hubNode);
+        const ripplePhase = (((now * hubBeat + hubIndex - Math.PI / 2) % TAU + TAU) % TAU) / TAU;
+        const rippleColor = loadColor(hubLoad);
+        const rippleRadius = 1.12 + ripplePhase * 1.3;
+        const rippleAlpha = (1 - ripplePhase) * (0.05 + hubLoad * 0.3);
+        const rippleSegments = 56;
+        for (let index = 0; index < rippleSegments; index += 1) {
+          const start = index / rippleSegments * TAU;
+          const end = (index + 1) / rippleSegments * TAU;
+          appendLine(lines, project([Math.cos(start) * rippleRadius, 0, Math.sin(start) * rippleRadius], view, size), project([Math.cos(end) * rippleRadius, 0, Math.sin(end) * rippleRadius], view, size), rippleColor, rippleAlpha);
+        }
+      }
 
       const scanY = Math.sin(now * 0.00045) * 0.88;
       const scanRadius = Math.sqrt(Math.max(0.1, 1.02 * 1.02 - scanY * scanY));
@@ -504,7 +540,7 @@
       for (let index = 0; index < segments; index += 1) {
         const start = index / segments * TAU;
         const end = (index + 1) / segments * TAU;
-        appendLine(lines, project([Math.cos(start) * scanRadius, scanY, Math.sin(start) * scanRadius], view, size), project([Math.cos(end) * scanRadius, scanY, Math.sin(end) * scanRadius], view, size), COLORS.cyan, 0.34);
+        appendLine(lines, project([Math.cos(start) * scanRadius, scanY, Math.sin(start) * scanRadius], view, size), project([Math.cos(end) * scanRadius, scanY, Math.sin(end) * scanRadius], view, size), shellColor, 0.34);
       }
 
       return { lines, points, meshInstances, view };
