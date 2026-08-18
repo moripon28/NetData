@@ -68,13 +68,13 @@
   function layoutNodes(nodes) {
     const groups = { core: [], infrastructure: [], telemetry: [], devices: [] };
     nodes.forEach((node) => {
-      if (node.role === "core") groups.core.push(node);
-      else if (["gateway", "qnap"].includes(node.role)) groups.infrastructure.push(node);
+      if (node.role === "gateway") groups.core.push(node);
+      else if (["core", "qnap"].includes(node.role)) groups.infrastructure.push(node);
       else if (["agent", "exporter"].includes(node.role)) groups.telemetry.push(node);
       else groups.devices.push(node);
     });
 
-    groups.core.forEach((node) => { node.position = [0, 0, 0]; node.orbit = 0; });
+    groups.core.forEach((node) => { node.position = [0, 0, 0]; node.orbit = 0; node.isHub = true; });
     const place = (items, radius, phase, verticalScale) => {
       items.forEach((node, index) => {
         const angle = phase + (index / Math.max(1, items.length)) * TAU;
@@ -84,6 +84,7 @@
           Math.sin(angle) * radius * 0.68,
         ];
         node.orbit = angle;
+        node.isHub = false;
       });
     };
     place(groups.infrastructure, 2.15, -0.62, 0.48);
@@ -444,7 +445,7 @@
         const color = statusColor(node);
         const offline = ["offline", "unreachable", "disabled", "unknown"].includes(String(node.status).toLowerCase());
         const activity = offline ? 0.02 : clamp(Number(node.activityLevel) || 0.12, 0.05, 1);
-        if (node.role !== "core") appendLine(lines, coreProjection, projected, color, offline ? 0.055 : 0.12);
+        if (!node.isHub) appendLine(lines, coreProjection, projected, color, offline ? 0.055 : 0.12);
 
         const trafficTarget = node.trafficTargetId ? projectedById.get(node.trafficTargetId) : null;
         if (trafficTarget && node.trafficMeasured && !offline) {
@@ -472,14 +473,14 @@
           addParticles(rx, trafficTarget.node, node, 0.47);
         }
 
-        const baseSize = node.role === "core" ? 48 : node.role === "gateway" ? 25 : node.role === "device" ? 13 : 18;
+        const baseSize = node.role === "gateway" ? 25 : node.role === "device" ? 13 : 18;
         points.push(projected.x, projected.y, baseSize * 1.85 * projected.scale, color[0], color[1], color[2], 0.13);
         points.push(projected.x, projected.y, baseSize * projected.scale, color[0], color[1], color[2], 0.92);
         if (node.id === selectedId) appendScreenRing(lines, projected, baseSize * 0.72 * projected.scale, color, 0.78, size);
 
         const selected = node.id === selectedId;
         const pulse = 1 + (reducedMotion.matches ? 0 : Math.sin(now * (0.0012 + activity * 0.0018) + index) * 0.06);
-        const baseScale = node.role === "core" ? 0.58 : node.role === "gateway" ? 0.45 : node.role === "qnap" ? 0.39 : ["agent", "exporter"].includes(node.role) ? 0.31 : node.role === "device-group" ? 0.4 : 0.24;
+        const baseScale = node.role === "gateway" ? 0.45 : node.role === "qnap" ? 0.39 : ["agent", "core", "exporter"].includes(node.role) ? 0.31 : node.role === "device-group" ? 0.4 : 0.24;
         const scale = baseScale * pulse * (selected ? 1.25 : 1);
         meshInstances.push({
           mesh: ["core", "gateway", "device-group"].includes(node.role) ? "sphere" : "octahedron",
@@ -697,8 +698,8 @@
         .sort((first, second) => {
           if (first.node.id === selectedId) return -1;
           if (second.node.id === selectedId) return 1;
-          if (first.node.role === "core") return -1;
-          if (second.node.role === "core") return 1;
+          if (first.node.isHub) return -1;
+          if (second.node.isHub) return 1;
           return first.projected.depth - second.projected.depth;
         });
 
