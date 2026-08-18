@@ -188,6 +188,7 @@
     let cardVisibleIds = new Set();
     const labels = new Map();
     const ALWAYS_VISIBLE_ROLES = new Set(["qnap", "device-group"]);
+    const SPHERE_ONLY_ROLES = new Set(["core"]);
     const gl = canvas.getContext("webgl", { alpha: true, antialias: true, premultipliedAlpha: false, powerPreference: "high-performance" });
     const context2d = gl ? null : canvas.getContext("2d");
     let lineProgram = null;
@@ -476,8 +477,10 @@
         }
 
         const baseSize = node.role === "gateway" ? 25 : node.role === "device" ? 13 : 18;
-        points.push(projected.x, projected.y, baseSize * 1.85 * projected.scale, color[0], color[1], color[2], 0.13);
-        points.push(projected.x, projected.y, baseSize * projected.scale, color[0], color[1], color[2], 0.92);
+        if (!SPHERE_ONLY_ROLES.has(node.role) || !webglReady) {
+          points.push(projected.x, projected.y, baseSize * 1.85 * projected.scale, color[0], color[1], color[2], 0.13);
+          points.push(projected.x, projected.y, baseSize * projected.scale, color[0], color[1], color[2], 0.92);
+        }
         if (node.id === selectedId) appendScreenRing(lines, projected, baseSize * 0.72 * projected.scale, color, 0.78, size);
 
         const selected = node.id === selectedId;
@@ -800,11 +803,12 @@
     }
 
     function buildLabels() {
-      const activeIds = new Set(nodes.map((node) => node.id));
+      const activeIds = new Set(nodes.filter((node) => !SPHERE_ONLY_ROLES.has(node.role)).map((node) => node.id));
       labels.forEach((label, id) => {
         if (!activeIds.has(id)) { label.remove(); labels.delete(id); }
       });
       nodes.forEach((node) => {
+        if (SPHERE_ONLY_ROLES.has(node.role)) return;
         let label = labels.get(node.id);
         if (!label) {
           label = document.createElement("button");

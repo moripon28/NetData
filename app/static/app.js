@@ -652,7 +652,7 @@
     const network = snapshot.network || {};
     const summary = snapshot.summary || {};
     const nodes = [];
-    const representedIps = new Set();
+    const representedIps = new Set(network.ip_address ? [network.ip_address] : []);
     const health = finiteNumber(summary.health_score);
     const coreStatus = health == null ? "checking" : health >= 85 ? "online" : health >= 65 ? "degraded" : "error";
     const coreTraffic = topologyTraffic(network.rx_bps, network.tx_bps);
