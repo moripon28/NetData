@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -7,6 +8,7 @@ import time
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from app.config import Settings
 from app.main import create_app
@@ -618,3 +620,133 @@ def test_llm_base_url_allows_external_when_flagged(tmp_path):
         assert update.json()["base_url"] == "https://api.openai.com/v1"
         settings_payload = client.get("/api/v1/llm/settings").json()
         assert settings_payload["base_url"] == "https://api.openai.com/v1"
+
+
+def _basic_header(username: str, password: str) -> dict[str, str]:
+    raw = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
+    return {"Authorization": f"Basic {raw}"}
+
+
+def test_web_auth_disabled_by_default_serves_without_credentials(tmp_path):
+    settings = Settings(data_dir=tmp_path, collector_enabled=False, discovery_enabled=False)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        for path in ("/", "/api/v1/snapshot", "/metrics", "/docs", "/openapi.json", "/static/app.js"):
+            response = client.get(path)
+            assert response.status_code == 200
+            assert "www-authenticate" not in response.headers
+
+
+def test_web_auth_rejects_unauthenticated_requests_when_enabled(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path, collector_enabled=False, discovery_enabled=False,
+        web_auth_user="admin", web_auth_password="secret123",
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        for path in ("/", "/api/v1/snapshot", "/metrics", "/docs", "/openapi.json", "/static/app.js"):
+            response = client.get(path)
+            assert response.status_code == 401
+            assert response.text == "authentication required"
+            assert response.headers["www-authenticate"] == 'Basic realm="netpulse"'
+            assert response.headers["cache-control"] == "no-store"
+
+
+def test_web_auth_accepts_valid_credentials_when_enabled(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path, collector_enabled=False, discovery_enabled=False,
+        web_auth_user="admin", web_auth_password="secret123",
+    )
+    app = create_app(settings)
+    headers = _basic_header("admin", "secret123")
+    with TestClient(app) as client:
+        assert client.get("/", headers=headers).status_code == 200
+        snapshot = client.get("/api/v1/snapshot", headers=headers)
+        assert snapshot.status_code == 200
+        assert snapshot.json()["type"] == "snapshot"
+        assert client.get("/metrics", headers=headers).status_code == 200
+
+
+def test_web_auth_rejects_invalid_credentials_when_enabled(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path, collector_enabled=False, discovery_enabled=False,
+        web_auth_user="admin", web_auth_password="secret123",
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        assert client.get("/", headers=_basic_header("admin", "wrong")).status_code == 401
+        assert client.get("/", headers=_basic_header("other", "secret123")).status_code == 401
+        assert client.get("/", headers=_basic_header("admin", "")).status_code == 401
+        # Non-base64 payload and a payload without the "user:pass" separator.
+        assert client.get("/", headers={"Authorization": "Basic !!!!"}).status_code == 401
+        assert client.get("/", headers=_basic_header_only_user()).status_code == 401
+        # Wrong scheme and missing header.
+        assert client.get("/", headers={"Authorization": "Bearer abc"}).status_code == 401
+        assert client.get("/").status_code == 401
+
+
+def _basic_header_only_user() -> dict[str, str]:
+    raw = base64.b64encode(b"admin").decode("ascii")
+    return {"Authorization": f"Basic {raw}"}
+
+
+def test_web_auth_exempts_health_agent_downloads_and_signed_heartbeat(tmp_path):
+    token = "agent-exempt-test-32char-token-v1"
+    settings = Settings(
+        data_dir=tmp_path, collector_enabled=False, discovery_enabled=False,
+        agent_token=token, web_auth_user="admin", web_auth_password="secret123",
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        assert client.get("/api/health").status_code == 200
+        for filename in ("netpulse_agent.py", "install-linux.sh", "install-windows.ps1"):
+            assert client.get(f"/agent/{filename}").status_code == 200
+        payload = {
+            "node_id": "node-exempt", "hostname": "exempt-host", "os_name": "Linux",
+            "cpu_percent": 1.0, "memory_percent": 1.0, "disk_percent": 1.0,
+            "uptime_seconds": 10,
+        }
+        body = json.dumps(payload, separators=(",", ":")).encode()
+        timestamp = str(int(time.time()))
+        signature = hmac.new(token.encode(), timestamp.encode() + b"." + body, hashlib.sha256).hexdigest()
+        response = client.post(
+            "/api/v1/agent/heartbeat",
+            content=body,
+            headers={"Content-Type": "application/json", "X-Agent-Timestamp": timestamp, "X-Agent-Signature": signature},
+        )
+        assert response.status_code == 200
+
+
+def test_web_auth_websocket_rejects_unauthenticated_upgrade(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path, collector_enabled=False, discovery_enabled=False,
+        web_auth_user="admin", web_auth_password="secret123",
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        with pytest.raises(WebSocketDisconnect):
+            with client.websocket_connect("/ws/live"):
+                pass
+
+
+def test_web_auth_websocket_accepts_valid_credentials(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path, collector_enabled=False, discovery_enabled=False,
+        web_auth_user="admin", web_auth_password="secret123",
+    )
+    app = create_app(settings)
+    headers = _basic_header("admin", "secret123")
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/live", headers=headers) as ws:
+            snapshot = ws.receive_json()
+            assert snapshot["type"] == "snapshot"
+            ws.close()
+
+
+def test_create_app_rejects_web_auth_user_without_password(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path, collector_enabled=False, discovery_enabled=False,
+        web_auth_user="admin", web_auth_password="",
+    )
+    with pytest.raises(RuntimeError, match="WEB_AUTH_PASSWORD"):
+        create_app(settings)

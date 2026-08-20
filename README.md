@@ -100,6 +100,8 @@ docker compose down
 | `PROMETHEUS_EXPORTER_INTERVAL_SECONDS` | `15` | exporterの収集間隔 |
 | `PROMETHEUS_EXPORTER_TIMEOUT_SECONDS` | `5` | exporter 1台あたりのタイムアウト |
 | `AGENT_TOKEN` | 空 | エージェント署名用のランダム共有鍵 |
+| `WEB_AUTH_USER` | 空 | Basic認証のユーザー名。空のままであればUI/APIは認証なしで動作 |
+| `WEB_AUTH_PASSWORD` | 空 | Basic認証のパスワード。`WEB_AUTH_USER`を設定したら併せて必須 |
 | `ANOMALY_MIN_SAMPLES` | `20` | 各時間帯の学習完了に必要なサンプル数 |
 | `LLM_REPORT_ENABLED` | `false` | ローカルLLMによる定期報告を有効化 |
 | `LLM_BASE_URL` | `http://127.0.0.1:1234/v1` | LM Studio等のOpenAI互換Base URL |
@@ -234,4 +236,4 @@ API仕様は `/docs` で確認できます。主要エンドポイントは `/ap
 
 ## セキュリティ上の注意
 
-このアプリは信頼できる家庭内LANでの利用を想定し、ログイン機能は持っていません。ルーターのポート転送などでインターネットへ直接公開しないでください。外部から見る場合は、VPN（WireGuard/Tailscaleなど）経由にするか、認証付きリバースプロキシを前段に置いてください。
+このアプリは信頼できる家庭内LANでの利用を想定し、既定ではログイン機能を持たないまま動作します。UIやAPIをLAN内の他の端末から利用する場合は、任意のHTTP Basic認証を有効にできます。`.env`へ`WEB_AUTH_USER`と`WEB_AUTH_PASSWORD`を設定して再作成すると、Web UI、API、WebSocketがユーザー名とパスワードを要求して起動します。ユーザー名だけを空パスワードで設定することは、推測可能になるため起動時にエラーになります。認証が有効でも`/api/health`、エージェントのインストーラ一式（`/agent/*`）、エージェント署名認証（HMAC）のエンドポイントは認証なしで利用できます。ルーターのポート転送などでインターネットへ直接公開しないでください。外部から見る場合は、VPN（WireGuard/Tailscaleなど）経由にするか、認証付きリバースプロキシを前段に置いてください。

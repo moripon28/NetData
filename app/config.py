@@ -74,6 +74,19 @@ def validate_agent_token(token: str) -> None:
         )
 
 
+def validate_web_auth(user: str, password: str) -> None:
+    """Fail startup when a username is set without a password.
+
+    A non-empty ``WEB_AUTH_USER`` with an empty password would let anyone log in
+    with ``user:`` (empty password), so refuse to start instead of running weakly.
+    """
+    if user and not password:
+        raise RuntimeError(
+            "WEB_AUTH_USERが設定されているのでWEB_AUTH_PASSWORDも設定してください。"
+            "パスワードの無いBasic認証は推測可能なため使用できません。"
+        )
+
+
 @dataclass(slots=True)
 class Settings:
     app_name: str = "NetPulse"
@@ -141,6 +154,8 @@ class Settings:
     llm_report_lookback: int = field(default_factory=lambda: _int_env("LLM_REPORT_LOOKBACK_MINUTES", 60, 15))
     llm_request_timeout: int = field(default_factory=lambda: _int_env("LLM_REQUEST_TIMEOUT_SECONDS", 120, 10))
     llm_allow_external: bool = field(default_factory=lambda: _bool_env("LLM_ALLOW_EXTERNAL", False))
+    web_auth_user: str = field(default_factory=lambda: os.getenv("WEB_AUTH_USER", "").strip())
+    web_auth_password: str = field(default_factory=lambda: os.getenv("WEB_AUTH_PASSWORD", ""))
 
     @property
     def database_path(self) -> Path:

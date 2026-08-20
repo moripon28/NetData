@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import time
@@ -13,7 +14,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app.config import Settings, validate_agent_token
+from app.config import Settings, validate_agent_token, validate_web_auth
 from app.database import Database
 from app.llm import LLMConnectionError, LLMReporter, ReportInProgressError
 from app.service import MonitorService
@@ -96,9 +97,43 @@ class WebSocketHub:
             self.disconnect(client)
 
 
+def build_basic_auth_checker(user: str, password: str):
+    """Return a callable that validates an ``Authorization: Basic`` header.
+
+    ``headers`` may be any mapping exposing ``.get`` (HTTP ``request.headers`` or a
+    WebSocket's ``.headers``). The username and password are compared in constant
+    time over UTF-8 bytes so a non-ASCII credential cannot raise and no timing
+    side-channel leaks whether the user or the password was wrong.
+    """
+    user_bytes = user.encode("utf-8")
+    password_bytes = password.encode("utf-8")
+
+    def check(headers: Any) -> bool:
+        raw = headers.get("authorization", "")
+        scheme, _, payload = raw.partition(" ")
+        if scheme.strip().lower() != "basic" or not payload.strip():
+            return False
+        try:
+            decoded = base64.b64decode(payload.strip().encode("ascii"), validate=True).decode("utf-8")
+        except (ValueError, UnicodeDecodeError):
+            return False
+        username, separator, candidate = decoded.partition(":")
+        if not separator:
+            return False
+        return (
+            hmac.compare_digest(username.encode("utf-8"), user_bytes)
+            and hmac.compare_digest(candidate.encode("utf-8"), password_bytes)
+        )
+
+    return check
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or Settings()
     validate_agent_token(resolved.agent_token)
+    validate_web_auth(resolved.web_auth_user, resolved.web_auth_password)
+    auth_enabled = bool(resolved.web_auth_user)
+    check_basic = build_basic_auth_checker(resolved.web_auth_user, resolved.web_auth_password)
     hub = WebSocketHub()
     database = Database(resolved.database_path)
     service = MonitorService(resolved, database, hub.broadcast)
@@ -120,6 +155,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.database = database
     app.state.monitor = service
     app.state.llm_reporter = reporter
+
+    if auth_enabled:
+        exempt_paths = {"/api/health", "/api/v1/agent/heartbeat"}
+        exempt_prefixes = ("/agent/",)
+
+        @app.middleware("http")
+        async def require_basic_auth(request: Request, call_next):
+            path = request.url.path
+            if (
+                request.method != "OPTIONS"
+                and path not in exempt_paths
+                and not path.startswith(exempt_prefixes)
+                and not check_basic(request.headers)
+            ):
+                return PlainTextResponse(
+                    "authentication required",
+                    status_code=401,
+                    headers={
+                        "WWW-Authenticate": 'Basic realm="netpulse"',
+                        "Cache-Control": "no-store",
+                    },
+                )
+            return await call_next(request)
 
     if resolved.cors_origins:
         app.add_middleware(
@@ -424,6 +482,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.websocket("/ws/live")
     async def websocket_live(websocket: WebSocket) -> None:
+        # Browsers cannot send an Authorization header on a WebSocket, so a
+        # rejected handshake answers the upgrade request with 403 before accept.
+        if auth_enabled and not check_basic(websocket.headers):
+            await websocket.close(code=1008, reason="authentication required")
+            return
         await hub.connect(websocket)
         await websocket.send_json(await service.snapshot())
         try:

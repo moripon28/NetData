@@ -888,6 +888,19 @@
     socket.addEventListener("error", () => socket.close());
   }
 
+  async function pollSnapshot() {
+    // Browsers cannot attach an Authorization header to a WebSocket, so while the
+    // live socket is unavailable (e.g. when basic auth is enabled) fall back to
+    // polling the REST snapshot. Same-origin fetch still sends the browser's
+    // Basic credentials, so the UI keeps updating after login.
+    if (state.socket?.readyState === WebSocket.OPEN) return;
+    try {
+      const response = await fetch("/api/v1/snapshot");
+      if (!response.ok) return;
+      applySnapshot(await response.json());
+    } catch (error) { console.warn("Snapshot poll failed", error); }
+  }
+
   function openDevice(ip) {
     const device = state.devices.find((item) => item.ip === ip);
     if (!device) return;
@@ -1155,6 +1168,7 @@
   window.setInterval(() => { elements.clock.textContent = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date()); }, 1000);
   window.setInterval(() => { if (state.socket?.readyState === WebSocket.OPEN) state.socket.send("ping"); }, 20000);
   window.setInterval(loadLLMReports, 60000);
+  window.setInterval(pollSnapshot, 5000);
   window.addEventListener("resize", drawTraffic);
 
   loadInitial();
