@@ -92,6 +92,61 @@
   const typeIcons = { router: "⌁", computer: "▣", phone: "▯", tablet: "▭", tv: "▰", iot: "◇", server: "▤", printer: "▥", camera: "◉", game: "✦", unknown: "?" };
 
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
+  const renderMarkdownInline = (value) => escapeHtml(value)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
+  function renderMarkdown(source) {
+    const blocks = [];
+    let listType = null;
+    let paragraph = [];
+    let quote = [];
+    const flushParagraph = () => {
+      if (!paragraph.length) return;
+      blocks.push(`<p>${paragraph.map(renderMarkdownInline).join("<br>")}</p>`);
+      paragraph = [];
+    };
+    const flushQuote = () => {
+      if (!quote.length) return;
+      blocks.push(`<blockquote>${quote.map(renderMarkdownInline).join("<br>")}</blockquote>`);
+      quote = [];
+    };
+    const closeList = () => {
+      if (!listType) return;
+      blocks.push(`</${listType}>`);
+      listType = null;
+    };
+    const flushAll = () => { flushParagraph(); flushQuote(); closeList(); };
+    for (const rawLine of String(source ?? "").split(/\r?\n/)) {
+      const trimmed = rawLine.trim();
+      if (!trimmed) { flushAll(); continue; }
+      const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+      if (heading) {
+        flushAll();
+        blocks.push(`<h${heading[1].length}>${renderMarkdownInline(heading[2])}</h${heading[1].length}>`);
+        continue;
+      }
+      if (/^(?:-{3,}|\*{3,}|_{3,})$/.test(trimmed)) { flushAll(); blocks.push("<hr>"); continue; }
+      const blockquote = trimmed.match(/^>\s?(.*)$/);
+      if (blockquote) {
+        flushParagraph(); closeList();
+        quote.push(blockquote[1]);
+        continue;
+      }
+      const ordered = trimmed.match(/^\d+[.)]\s+(.+)$/);
+      const unordered = ordered ? null : trimmed.match(/^[-*]\s+(.+)$/);
+      if (ordered || unordered) {
+        const type = ordered ? "ol" : "ul";
+        flushParagraph(); flushQuote();
+        if (listType !== type) { closeList(); blocks.push(`<${type}>`); listType = type; }
+        blocks.push(`<li>${renderMarkdownInline((ordered || unordered)[1])}</li>`);
+        continue;
+      }
+      flushQuote(); closeList();
+      paragraph.push(trimmed);
+    }
+    flushAll();
+    return blocks.join("");
+  }
   const clamp = (value, min, max) => Math.max(min, Math.min(max, Number(value) || 0));
   const formatRate = (bytes) => {
     const bits = Math.max(0, Number(bytes) || 0) * 8;
@@ -357,7 +412,11 @@
     setMiniStatus(elements.llmReportStatus, report.status === "completed" ? "completed" : "error");
     elements.llmReportTime.textContent = formatDateTime(report.created_at);
     elements.llmReportModel.textContent = `${report.model} · ${report.context?.sample_count || 0} samples · ${report.context?.trigger === "scheduled" ? "scheduled" : "manual"}`;
-    elements.llmReportContent.textContent = report.status === "completed" ? report.content : `分析に失敗しました: ${report.error || "原因不明"}`;
+    if (report.status === "completed") {
+      elements.llmReportContent.innerHTML = renderMarkdown(report.content);
+    } else {
+      elements.llmReportContent.textContent = `分析に失敗しました: ${report.error || "原因不明"}`;
+    }
   }
 
   function flavorTranscript(payload) {

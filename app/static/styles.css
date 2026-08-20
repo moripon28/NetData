@@ -218,7 +218,22 @@ body::before { content: ""; position: fixed; inset: 0; pointer-events: none; bac
 
 .events-panel { grid-column: 1 / -1; min-height: 230px; }.event-list { display: grid; grid-template-columns: repeat(3, 1fr); }.event-item { min-height: 82px; padding: 15px 20px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 8px 1fr auto; gap: 10px; align-items: start; }.event-item:nth-child(3n) { border-right: 0; }.event-item .event-dot { width: 6px; height: 6px; margin-top: 5px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 8px currentColor; }.event-item.warning .event-dot { background: var(--orange); }.event-item.error .event-dot { background: var(--danger); }.event-item.success .event-dot { background: var(--mint); }.event-copy { display: grid; gap: 4px; }.event-copy strong { font-size: 10px; }.event-copy span { color: var(--muted); font-size: 9px; line-height: 1.5; }.event-time { color: #61736c; font: 8px var(--mono); }.empty-events { grid-column: 1 / -1; text-align: center; color: var(--muted); padding: 35px; }
 
-.llm-panel { grid-column: 1 / -1; min-height: 270px; }.llm-report-wrap { display: grid; grid-template-columns: 235px minmax(0, 1fr); min-height: 205px; }.llm-report-meta { padding: 24px 21px; border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: flex-start; gap: 13px; background: radial-gradient(circle at 0 0, rgba(167,139,250,.08), transparent 62%); }.llm-report-meta strong { font: 11px var(--mono); }.llm-report-meta span { color: var(--muted); font-size: 9px; line-height: 1.6; word-break: break-word; }.llm-report-content { padding: 24px 26px; color: #c8dcd3; font-size: 12px; line-height: 1.9; white-space: pre-wrap; overflow-wrap: anywhere; }.mini-status.completed, .mini-status.configured { color: var(--mint); border-color: rgba(156,255,206,.3); }.mini-status.running, .mini-status.waiting { color: var(--violet); border-color: rgba(167,139,250,.35); }
+.llm-panel { grid-column: 1 / -1; min-height: 270px; }.llm-report-wrap { display: grid; grid-template-columns: 235px minmax(0, 1fr); min-height: 205px; }.llm-report-meta { padding: 24px 21px; border-right: 1px solid var(--line); display: flex; flex-direction: column; align-items: flex-start; gap: 13px; background: radial-gradient(circle at 0 0, rgba(167,139,250,.08), transparent 62%); }.llm-report-meta strong { font: 11px var(--mono); }.llm-report-meta span { color: var(--muted); font-size: 9px; line-height: 1.6; word-break: break-word; }.llm-report-content { padding: 24px 26px; color: #c8dcd3; font-size: 12px; line-height: 1.9; overflow-wrap: anywhere; }
+.llm-report-content > :first-child { margin-top: 0; }
+.llm-report-content p { margin: 0 0 12px; }
+.llm-report-content h1, .llm-report-content h2, .llm-report-content h3, .llm-report-content h4, .llm-report-content h5, .llm-report-content h6 { margin: 18px 0 8px; font-family: var(--mono); letter-spacing: .14em; color: var(--mint); }
+.llm-report-content h1 { font-size: calc(15 * var(--ui-font-unit)); }
+.llm-report-content h2 { font-size: calc(14 * var(--ui-font-unit)); }
+.llm-report-content h3 { font-size: calc(13 * var(--ui-font-unit)); }
+.llm-report-content h4 { font-size: calc(12 * var(--ui-font-unit)); }
+.llm-report-content h5, .llm-report-content h6 { font-size: calc(11 * var(--ui-font-unit)); }
+.llm-report-content ol, .llm-report-content ul { margin: 0 0 12px; padding-left: 22px; }
+.llm-report-content li { margin: 4px 0; }
+.llm-report-content li::marker { color: var(--cyan); }
+.llm-report-content strong { color: var(--text); font-weight: 600; }
+.llm-report-content code { padding: 1px 6px; border: 1px solid var(--line); background: rgba(76,231,219,.06); color: var(--cyan); font-family: var(--mono); font-size: calc(11 * var(--ui-font-unit)); }
+.llm-report-content blockquote { margin: 0 0 12px; padding: 6px 12px; border-left: 2px solid var(--line-bright); color: var(--muted); }
+.llm-report-content hr { border: 0; border-top: 1px solid var(--line); margin: 14px 0; }.mini-status.completed, .mini-status.configured { color: var(--mint); border-color: rgba(156,255,206,.3); }.mini-status.running, .mini-status.waiting { color: var(--violet); border-color: rgba(167,139,250,.35); }
 
 footer { height: 68px; padding: 0 clamp(20px, 4vw, 68px); border-top: 1px solid var(--line); display: flex; align-items: center; justify-content: space-between; color: #556760; font: 8px var(--mono); letter-spacing: .12em; } footer a { color: var(--muted); text-decoration: none; } footer a:hover { color: var(--mint); }
 
