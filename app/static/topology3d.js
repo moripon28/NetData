@@ -64,6 +64,15 @@
     return { load, speed: 0.0011 + activity * 0.0013 + load * 0.0042, amplitude: 0.05 + load * 0.1 };
   }
 
+  function idPhase(text) {
+    let hash = 2166136261;
+    for (let index = 0; index < text.length; index += 1) {
+      hash ^= text.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    return (hash >>> 0) / 4294967295;
+  }
+
   function trafficBand(level, rate) {
     if (!(Number(rate) > 0)) return "idle";
     if (level < 0.35) return "low";
@@ -88,6 +97,10 @@
       else if (["agent", "exporter"].includes(node.role)) groups.telemetry.push(node);
       else groups.devices.push(node);
     });
+    const byId = (first, second) => String(first.id).localeCompare(String(second.id));
+    groups.infrastructure.sort(byId);
+    groups.telemetry.sort(byId);
+    groups.devices.sort(byId);
 
     groups.core.forEach((node) => { node.position = [0, 0, 0]; node.orbit = 0; node.isHub = true; });
     const place = (items, radius, phase, verticalScale) => {
@@ -201,6 +214,7 @@
     let cardLimit = 5;
     let cardVisibleIds = new Set();
     const labels = new Map();
+    const phaseState = new Map();
     const ALWAYS_VISIBLE_ROLES = new Set(["qnap", "device-group"]);
     const SPHERE_ONLY_ROLES = new Set(["core"]);
     const gl = canvas.getContext("webgl", { alpha: true, antialias: true, premultipliedAlpha: false, powerPreference: "high-performance" });
@@ -462,14 +476,36 @@
       projectedNodes = nodes.map((node) => ({ node, projected: project(node.position, view, size) }));
       const projectedById = new Map(projectedNodes.map((item) => [item.node.id, item]));
       const coreProjection = project([0, 0, 0], view, size);
+      const frameDeltaMs = clamp(now - lastFrameAt, 0, 100);
+      const phaseFor = (node) => {
+        let phase = phaseState.get(node.id);
+        if (!phase) {
+          phase = {
+            flow: 0,
+            flowOffset: idPhase(node.id),
+            beat: idPhase(`${node.id}:beat`) * TAU,
+            spin: node.orbit || 0,
+            ripple: idPhase(`${node.id}:ripple`) * TAU,
+          };
+          phaseState.set(node.id, phase);
+        }
+        return phase;
+      };
 
-      projectedNodes.forEach(({ node, projected }, index) => {
+      projectedNodes.forEach(({ node, projected }) => {
         const offline = ["offline", "unreachable", "disabled", "unknown"].includes(String(node.status).toLowerCase());
         const activity = offline ? 0.02 : clamp(Number(node.activityLevel) || 0.12, 0.05, 1);
         const { load, speed: beatSpeed, amplitude: beatAmplitude } = loadBeat(offline ? null : node);
         const baseColor = statusColor(node);
         const color = offline || !(load > 0) ? baseColor : mixColor(baseColor, loadColor(load), 0.22 + load * 0.74);
         if (!node.isHub) appendLine(lines, coreProjection, projected, color, offline ? 0.055 : 0.12);
+
+        const nodePhase = phaseFor(node);
+        if (!reducedMotion.matches) {
+          nodePhase.beat = (nodePhase.beat + beatSpeed * frameDeltaMs) % TAU;
+          nodePhase.ripple = (nodePhase.ripple + beatSpeed * frameDeltaMs) % TAU;
+          nodePhase.spin = (nodePhase.spin + 0.00036 * (0.7 + idPhase(`${node.id}:spin`) * 0.45) * frameDeltaMs) % TAU;
+        }
 
         const trafficTarget = node.trafficTargetId ? projectedById.get(node.trafficTargetId) : null;
         if (trafficTarget && node.trafficMeasured && !offline) {
@@ -479,15 +515,15 @@
           const rx = Math.max(0, Number(node.rxBps) || 0);
           const tx = Math.max(0, Number(node.txBps) || 0);
           const total = rx + tx;
+          if (!reducedMotion.matches && total > 0) nodePhase.flow = (nodePhase.flow + (0.00011 + level * 0.00052) * frameDeltaMs) % 1;
           const addParticles = (rate, from, to, directionOffset) => {
             if (!(rate > 0) || !(total > 0)) return;
             const share = rate / total;
             const particleCount = 1 + Math.round(level * 3 * share);
-            const speed = 0.00011 + level * 0.00052;
             for (let particleIndex = 0; particleIndex < particleCount; particleIndex += 1) {
               const progress = reducedMotion.matches
                 ? (particleIndex + 1) / (particleCount + 1)
-                : (now * speed + index * 0.173 + particleIndex / particleCount + directionOffset) % 1;
+                : (nodePhase.flow + nodePhase.flowOffset + particleIndex / particleCount + directionOffset) % 1;
               const world = from.position.map((value, axis) => value + (to.position[axis] - value) * progress);
               const particle = project(world, view, size);
               points.push(particle.x, particle.y, (5 + level * 8) * particle.scale, flowColor[0], flowColor[1], flowColor[2], 0.52 + level * 0.42);
@@ -505,14 +541,14 @@
         if (node.id === selectedId) appendScreenRing(lines, projected, baseSize * 0.72 * projected.scale, color, 0.78, size);
 
         const selected = node.id === selectedId;
-        const pulse = 1 + (reducedMotion.matches ? 0 : Math.sin(now * beatSpeed + index) * beatAmplitude);
+        const pulse = 1 + (reducedMotion.matches ? 0 : Math.sin(nodePhase.beat) * beatAmplitude);
         const baseScale = node.role === "gateway" ? 0.45 : node.role === "qnap" ? 0.39 : ["agent", "core", "exporter"].includes(node.role) ? 0.31 : node.role === "device-group" ? 0.4 : 0.24;
         const scale = baseScale * pulse * (selected ? 1.25 : 1);
         meshInstances.push({
           mesh: ["core", "gateway", "device-group"].includes(node.role) ? "sphere" : "octahedron",
           center: node.position,
           scale: node.role === "gateway" ? [scale * 1.45, scale * 0.32, scale * 1.45] : node.role === "qnap" ? [scale * 1.15, scale * 0.75, scale] : [scale, scale, scale],
-          spin: node.orbit + now * (reducedMotion.matches ? 0 : 0.00036) * (0.7 + index * 0.025),
+          spin: nodePhase.spin,
           color,
           alpha: offline ? 0.2 : selected ? 0.96 : 0.72,
           emissive: selected ? 0.94 : clamp(0.32 + activity * 0.26 + load * 0.42, 0, 1),
@@ -520,9 +556,8 @@
       });
 
       if (hubNode && !hubOffline && !reducedMotion.matches && hubLoad > 0.03) {
-        const { speed: hubBeat } = loadBeat(hubNode);
-        const hubIndex = nodes.indexOf(hubNode);
-        const ripplePhase = (((now * hubBeat + hubIndex - Math.PI / 2) % TAU + TAU) % TAU) / TAU;
+        const hubPhase = phaseFor(hubNode);
+        const ripplePhase = (((hubPhase.ripple - Math.PI / 2) % TAU + TAU) % TAU) / TAU;
         const rippleColor = loadColor(hubLoad);
         const rippleRadius = 1.12 + ripplePhase * 1.3;
         const rippleAlpha = (1 - ripplePhase) * (0.05 + hubLoad * 0.3);
@@ -930,6 +965,10 @@
 
     function setNodes(nextNodes) {
       nodes = layoutNodes(nextNodes.map((node) => ({ ...node, metrics: [...(node.metrics || [])] })));
+      const nodeIds = new Set(nodes.map((node) => node.id));
+      for (const id of [...phaseState.keys()]) {
+        if (!nodeIds.has(id)) phaseState.delete(id);
+      }
       if (!nodes.some((node) => node.id === selectedId)) selectedId = nodes.find((node) => node.role === "core")?.id || nodes[0]?.id || null;
       cardVisibleIds = computeCardVisibleIds();
       buildLabels();

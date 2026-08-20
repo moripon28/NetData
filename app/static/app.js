@@ -755,8 +755,9 @@
         description: role === "agent" ? "署名付きホストエージェントから受信した負荷・プロセス数・INETソケットなどの集計です。接続先アドレスや通信内容は収集しません。" : "Prometheus Exporterから取得したホストメトリクスです。Exporterが公開している場合だけ負荷・プロセス数・ソケット集計を表示します。",
       });
     };
-    (snapshot.agents?.items || []).slice(0, 6).forEach((host, index) => appendHostNode(host, "agent", index));
-    (snapshot.exporters?.nodes || []).slice(0, 6).forEach((host, index) => appendHostNode(host, "exporter", index));
+    const orderedHosts = (items) => [...items].sort((first, second) => Number(inactiveTopologyStatuses.has(String(first.status || "unknown").toLowerCase())) - Number(inactiveTopologyStatuses.has(String(second.status || "unknown").toLowerCase())) || String(first.node_id || "").localeCompare(String(second.node_id || "")));
+    orderedHosts(snapshot.agents?.items || []).slice(0, 6).forEach((host, index) => appendHostNode(host, "agent", index));
+    orderedHosts(snapshot.exporters?.nodes || []).slice(0, 6).forEach((host, index) => appendHostNode(host, "exporter", index));
 
     const topologyDevices = [...state.devices]
       .filter((device) => !representedIps.has(device.ip))
