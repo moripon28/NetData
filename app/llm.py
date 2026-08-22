@@ -247,7 +247,8 @@ class LocalLLMClient:
                 {
                     "role": "user",
                     "content": "次のNetPulse集計を分析し、内部の検討過程を含めず日本語の最終報告だけを返してください。\n"
-                    + json.dumps(context, ensure_ascii=False),
+                    + json.dumps(context, ensure_ascii=False)
+                    + "\n\n【最重要】出力はすべて日本語で記述すること。英語を一切使用しないこと。",
                 },
             ],
             "temperature": 0.2,
