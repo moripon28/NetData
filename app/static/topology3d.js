@@ -26,6 +26,16 @@
     ".topology-scene-meta",
     ".topology-legend",
   ];
+  const OFFLINE_STATUSES = ["offline", "unreachable", "disabled", "unknown"];
+  const WARNING_STATUSES = ["warning", "degraded", "checking", "learning"];
+  const ERROR_STATUSES = ["error", "critical", "anomaly"];
+  const ORBIT_Z_SQUASH = 0.68;
+  const ORBIT_KEPLER_K = 0.00026;
+  const ORBIT_EASE_MS = 900;
+  const WORLD_BASE_SPEED = 0.000035;
+  const WORLD_MIN_FACTOR = 0.55;
+  const WORLD_PULSE_GAIN = 1.9;
+  const WORLD_EASE_MS = 1400;
 
   function statusColor(node) {
     const status = String(node.status || "unknown").toLowerCase();
@@ -62,6 +72,28 @@
     const load = clamp(Number(node && node.loadLevel) || 0, 0, 1);
     const activity = clamp(Number(node && node.activityLevel) || 0.12, 0.05, 1);
     return { load, speed: 0.0011 + activity * 0.0013 + load * 0.0042, amplitude: 0.05 + load * 0.1 };
+  }
+
+  function orbitPosition(node, angle) {
+    const radius = Math.max(0.5, Number(node.orbitRadius) || 2);
+    return [
+      Math.cos(angle) * radius,
+      (Number(node.baseAltitude) || 0) + (Number(node.verticalAmp) || 0) * Math.sin(angle + (Number(node.verticalPhase) || 0)),
+      Math.sin(angle) * radius * ORBIT_Z_SQUASH,
+    ];
+  }
+
+  function orbitTargetSpeed(node) {
+    const status = String(node.status || "unknown").toLowerCase();
+    if (OFFLINE_STATUSES.includes(status)) return 0;
+    const radius = Math.max(0.5, Number(node.orbitRadius) || 2);
+    const kepler = ORBIT_KEPLER_K / Math.pow(radius, 1.5);
+    const activity = clamp(Number(node.activityLevel) || 0.12, 0.05, 1);
+    const individuality = 0.85 + idPhase(`${node.id}:orbit`) * 0.3;
+    let statusBoost = 1;
+    if (ERROR_STATUSES.includes(status)) statusBoost = 1.6;
+    else if (WARNING_STATUSES.includes(status)) statusBoost = 1.35;
+    return kepler * individuality * (0.4 + activity * 1.6) * statusBoost;
   }
 
   function idPhase(text) {
@@ -103,21 +135,22 @@
     groups.devices.sort(byId);
 
     groups.core.forEach((node) => { node.position = [0, 0, 0]; node.orbit = 0; node.isHub = true; });
-    const place = (items, radius, phase, verticalScale) => {
+    const place = (items, radius, phase) => {
       items.forEach((node, index) => {
         const angle = phase + (index / Math.max(1, items.length)) * TAU;
-        node.position = [
-          Math.cos(angle) * radius,
-          Math.sin(angle * 2 + phase) * verticalScale,
-          Math.sin(angle) * radius * 0.68,
-        ];
+        node.orbitRadius = radius;
+        node.initialAngle = angle;
+        node.baseAltitude = (idPhase(`${node.id}:alt`) * 2 - 1) * (0.3 + radius * 0.28);
+        node.verticalAmp = radius * (0.08 + idPhase(`${node.id}:vamp`) * 0.16);
+        node.verticalPhase = idPhase(`${node.id}:vphase`) * TAU;
         node.orbit = angle;
+        node.position = orbitPosition(node, angle);
         node.isHub = false;
       });
     };
-    place(groups.infrastructure, 2.15, -0.62, 0.48);
-    place(groups.telemetry, 3.05, 0.3, 0.78);
-    place(groups.devices, 3.85, -0.1, 1.05);
+    place(groups.infrastructure, 2.15, -0.62);
+    place(groups.telemetry, 3.05, 0.3);
+    place(groups.devices, 3.85, -0.1);
     return nodes;
   }
 
@@ -207,6 +240,8 @@
     let yawOffset = INITIAL_YAW;
     let pitchOffset = INITIAL_PITCH;
     let cameraDistance = INITIAL_DISTANCE;
+    let worldYawDrift = 0;
+    let worldSpeed = WORLD_BASE_SPEED * WORLD_MIN_FACTOR;
     let dragStart = null;
     let dragDistance = 0;
     let projectedNodes = [];
@@ -418,9 +453,53 @@
       }
     }
 
+    function phaseFor(node) {
+      let phase = phaseState.get(node.id);
+      if (!phase) {
+        phase = {
+          flow: 0,
+          flowOffset: idPhase(node.id),
+          beat: idPhase(`${node.id}:beat`) * TAU,
+          spin: node.orbit || 0,
+          ripple: idPhase(`${node.id}:ripple`) * TAU,
+          orbitAngle: node.initialAngle != null ? node.initialAngle : (node.orbit || 0),
+          orbitSpeed: 0,
+        };
+        phaseState.set(node.id, phase);
+      }
+      return phase;
+    }
+
     function buildScene(now, size) {
+      const frameDeltaMs = clamp(now - lastFrameAt, 0, 100);
+      if (!reducedMotion.matches && frameDeltaMs > 0) {
+        let activitySum = 0;
+        let loadSum = 0;
+        let onlineCount = 0;
+        nodes.forEach((node) => {
+          if (OFFLINE_STATUSES.includes(String(node.status || "unknown").toLowerCase())) return;
+          activitySum += clamp(Number(node.activityLevel) || 0.12, 0.05, 1);
+          loadSum += clamp(Number(node.loadLevel) || 0, 0, 1);
+          onlineCount += 1;
+        });
+        const networkPulse = onlineCount ? clamp((activitySum / onlineCount) * 0.65 + (loadSum / onlineCount) * 0.35, 0, 1) : 0;
+        const worldTarget = WORLD_BASE_SPEED * (WORLD_MIN_FACTOR + networkPulse * WORLD_PULSE_GAIN);
+        worldSpeed += (worldTarget - worldSpeed) * (1 - Math.exp(-frameDeltaMs / WORLD_EASE_MS));
+        worldYawDrift = (worldYawDrift + worldSpeed * frameDeltaMs) % TAU;
+        nodes.forEach((node) => {
+          if (!node.orbitRadius) return;
+          const phase = phaseFor(node);
+          const target = orbitTargetSpeed(node);
+          phase.orbitSpeed += (target - phase.orbitSpeed) * (1 - Math.exp(-frameDeltaMs / ORBIT_EASE_MS));
+          phase.orbitAngle = (phase.orbitAngle + phase.orbitSpeed * frameDeltaMs) % TAU;
+        });
+      }
+      nodes.forEach((node) => {
+        if (!node.orbitRadius) return;
+        node.position = orbitPosition(node, phaseFor(node).orbitAngle);
+      });
       const view = {
-        yaw: yawOffset + (reducedMotion.matches ? 0 : now * 0.000035),
+        yaw: yawOffset + worldYawDrift,
         pitch: pitchOffset,
         distance: cameraDistance,
         focal: size.width <= 650 ? 1.45 : size.width <= 920 ? 1.9 : 2.25,
@@ -476,21 +555,6 @@
       projectedNodes = nodes.map((node) => ({ node, projected: project(node.position, view, size) }));
       const projectedById = new Map(projectedNodes.map((item) => [item.node.id, item]));
       const coreProjection = project([0, 0, 0], view, size);
-      const frameDeltaMs = clamp(now - lastFrameAt, 0, 100);
-      const phaseFor = (node) => {
-        let phase = phaseState.get(node.id);
-        if (!phase) {
-          phase = {
-            flow: 0,
-            flowOffset: idPhase(node.id),
-            beat: idPhase(`${node.id}:beat`) * TAU,
-            spin: node.orbit || 0,
-            ripple: idPhase(`${node.id}:ripple`) * TAU,
-          };
-          phaseState.set(node.id, phase);
-        }
-        return phase;
-      };
 
       projectedNodes.forEach(({ node, projected }) => {
         const offline = ["offline", "unreachable", "disabled", "unknown"].includes(String(node.status).toLowerCase());
@@ -969,6 +1033,10 @@
       for (const id of [...phaseState.keys()]) {
         if (!nodeIds.has(id)) phaseState.delete(id);
       }
+      nodes.forEach((node) => {
+        if (!node.orbitRadius) return;
+        node.position = orbitPosition(node, phaseFor(node).orbitAngle);
+      });
       if (!nodes.some((node) => node.id === selectedId)) selectedId = nodes.find((node) => node.role === "core")?.id || nodes[0]?.id || null;
       cardVisibleIds = computeCardVisibleIds();
       buildLabels();
