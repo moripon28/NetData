@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 from urllib.parse import urlsplit, urlunsplit
 
+import re
+
 import httpx
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -20,6 +22,19 @@ from app.database import Database
 
 
 logger = logging.getLogger(__name__)
+
+# Small Gemma E2B-class models served by Ollama can, under low-temperature
+# sampling, fall into a loop that emits reserved placeholder tokens
+# ("<unused49>", "<unused50>", ...) instead of readable text. Detect such
+# collapsed output so it can be retried / surfaced clearly.
+_UNUSED_TOKEN_RE = re.compile(r"<unused[0-9]+>")
+
+
+def _is_degenerated(content: str) -> bool:
+    if not content or "unused" not in content:
+        return False
+    total = sum(len(token) for token in _UNUSED_TOKEN_RE.findall(content))
+    return total / max(len(content), 1) > 0.2
 
 
 SnapshotProvider = Callable[[], Awaitable[dict[str, Any]]]
@@ -240,21 +255,52 @@ class LocalLLMClient:
         allow_external: bool = False,
     ) -> str:
         normalized = self.normalize_base_url(base_url, allow_external)
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": "次のNetPulse集計を分析し、内部の検討過程を含めず日本語の最終報告だけを返してください。\n"
-                    + json.dumps(context, ensure_ascii=False)
-                    + "\n\n【最重要】出力はすべて日本語で記述すること。英語を一切使用しないこと。",
-                },
-            ],
-            "temperature": 0.2,
-            "max_tokens": 2000,
-            "reasoning_effort": "none",
-        }
+        user_content = (
+            "次のNetPulse集計を分析し、内部の検討過程を含めず日本語の最終報告だけを返してください。\n"
+            + json.dumps(context, ensure_ascii=False)
+            + "\n\n【最重要】出力はすべて日本語で記述すること。英語を一切使用しないこと。"
+            + "\n出力が同じ記号や繰り返しトークンだけになる場合は、必ず別の表現で日本語の本文を返すこと。"
+        )
+        # Low-temperature sampling can drive small Gemma E2B-class models into
+        # a repetition loop of reserved placeholder tokens. Start moderate
+        # with a frequency penalty and escalate temperature + penalty on each
+        # retry so the sampler can escape the loop. HTTP and network errors
+        # are raised immediately (retrying them would only waste time).
+        attempts = (
+            {"temperature": 0.5, "frequency_penalty": 0.7},
+            {"temperature": 0.8, "frequency_penalty": 1.0},
+            {"temperature": 1.1, "frequency_penalty": 1.2},
+        )
+        for sampling in attempts:
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                "max_tokens": 2000,
+                "reasoning_effort": "none",
+                **sampling,
+            }
+            content = await self._request_chat(normalized, api_key, payload, allow_external)
+            if not _is_degenerated(content):
+                return content[:50_000]
+            logger.warning(
+                "LLM report degenerated into placeholder-token loop (temperature=%s); retrying",
+                sampling["temperature"],
+            )
+        raise LLMConnectionError(
+            "LLMの応答が繰り返しトークンに収束し、日本語の報告本文として保存できませんでした。"
+            "温度やfrequency_penaltyを調整するか、9Bクラスのモデルを使うことを推奨します。"
+        )
+
+    async def _request_chat(
+        self,
+        normalized: str,
+        api_key: str,
+        payload: dict[str, Any],
+        allow_external: bool,
+    ) -> str:
         try:
             async with httpx.AsyncClient(
                 timeout=self.timeout_seconds,
@@ -288,7 +334,7 @@ class LocalLLMClient:
             )
         if not isinstance(content, str) or not content.strip():
             raise LLMConnectionError("LLMの応答に報告本文がありません。")
-        return content.strip()[:50_000]
+        return content.strip()
 
 
 class LLMReporter:

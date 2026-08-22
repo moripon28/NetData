@@ -110,6 +110,43 @@ async def test_local_client_rejects_reasoning_without_final_content():
 
 
 @pytest.mark.asyncio
+async def test_local_client_retries_degenerated_placeholder_loop():
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(
+                200, json={"choices": [{"message": {"content": "<unused50>" * 30}}]}
+            )
+        payload = json.loads(request.content)
+        assert payload["frequency_penalty"] == 1.0
+        assert payload["temperature"] >= 0.7
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "総評\n正常です。"}}]}
+        )
+
+    client = LocalLLMClient(transport=httpx.MockTransport(handler))
+    content = await client.create_report(
+        "http://192.168.10.52:11434/v1", "gemma4:e2b", "", {"sample_count": 10}
+    )
+    assert content == "総評\n正常です。"
+    assert calls["n"] == 2
+
+
+@pytest.mark.asyncio
+async def test_local_client_rejects_persistent_degeneration():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"choices": [{"message": {"content": "<unused49>" * 50}}]}
+        )
+
+    client = LocalLLMClient(transport=httpx.MockTransport(handler))
+    with pytest.raises(LLMConnectionError, match="繰り返しトークン"):
+        await client.create_report("http://192.168.10.52:11434/v1", "gemma4:e2b", "", {})
+
+
+@pytest.mark.asyncio
 async def test_local_client_enriches_lm_studio_models_and_excludes_embedding():
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/v1/models":
