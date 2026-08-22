@@ -188,6 +188,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_headers=["Content-Type"],
         )
 
+    @app.middleware("http")
+    async def no_cache_for_ui(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         return {
