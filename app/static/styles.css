@@ -318,7 +318,7 @@ dialog textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px 
 .topology-readouts span { min-width: 0; display: grid; gap: 3px; padding: 6px 7px; background: rgba(3,13,15,.88); }
 .topology-readouts small { overflow: hidden; text-overflow: ellipsis; color: #526c69; font: 5px var(--mono); letter-spacing: .08em; white-space: nowrap; }
 .topology-readouts b { overflow: hidden; text-overflow: ellipsis; color: #9de9dc; font: 7px var(--mono); white-space: nowrap; }
-.topology-camera-hud { position: absolute; z-index: 7; right: 18px; top: 348px; width: 242px; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; pointer-events: none; background: rgba(76,231,219,.075); border-right: 1px solid rgba(76,231,219,.16); opacity: .68; }
+.topology-camera-hud { position: absolute; z-index: 7; right: 18px; bottom: 64px; width: 242px; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; pointer-events: none; background: rgba(76,231,219,.075); border-right: 1px solid rgba(76,231,219,.16); opacity: .68; }
 .topology-camera-hud span { display: grid; gap: 3px; padding: 8px 9px; background: rgba(3,13,15,.82); }
 .topology-camera-hud b { color: rgba(156,255,206,.76); font: 6px var(--mono); letter-spacing: .1em; }
 .topology-camera-hud small { color: #49625e; font: 5px var(--mono); letter-spacing: .08em; }
