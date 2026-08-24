@@ -344,11 +344,13 @@ class LLMReporter:
         database: Database,
         snapshot_provider: SnapshotProvider,
         client: LocalLLMClient | None = None,
+        notifier: Any | None = None,
     ) -> None:
         self.settings = settings
         self.database = database
         self.snapshot_provider = snapshot_provider
         self.client = client or LocalLLMClient(settings.llm_request_timeout)
+        self.notifier = notifier
         self.cipher = SecretCipher(settings.data_dir / ".llm-settings.key")
         self._task: asyncio.Task[Any] | None = None
         self._running = False
@@ -451,6 +453,17 @@ class LLMReporter:
     async def reports(self, limit: int = 10) -> list[dict[str, Any]]:
         return await self.database.llm_reports(limit)
 
+    async def _record_event(
+        self, severity: str, category: str, title: str, detail: str, metadata: dict[str, Any] | None = None
+    ) -> None:
+        await self.database.add_event(severity, category, title, detail, metadata)
+        if self.notifier is None:
+            return
+        try:
+            await self.notifier.notify(severity, category, title, detail, metadata)
+        except Exception:
+            logger.warning("notification failed", exc_info=True)
+
     async def flavor_reports(self) -> dict[str, Any]:
         values = await self.database.llm_settings()
         scope = values.get("flavor_scope", "last_3")
@@ -487,7 +500,7 @@ class LLMReporter:
                     error=error,
                     context={"trigger": trigger, "sample_count": sample_count},
                 )
-                await self.database.add_event("warning", "llm", "LLM report failed", error)
+                await self._record_event("warning", "llm", "LLM report failed", error)
                 raise
             report = await self.database.save_llm_report(
                 period_start=period_start,
@@ -497,7 +510,7 @@ class LLMReporter:
                 content=content,
                 context={"trigger": trigger, "sample_count": sample_count},
             )
-            await self.database.add_event(
+            await self._record_event(
                 "success", "llm", "Network report generated", f"Analyzed {sample_count} samples with {values['model']}.",
             )
             return report

@@ -62,6 +62,17 @@
     llmInterval: $("llmInterval"), llmLookback: $("llmLookback"), llmApiKey: $("llmApiKey"),
     llmFlavorScopeSelect: $("llmFlavorScopeSelect"),
     llmClearApiKey: $("llmClearApiKey"), llmSettingsStatus: $("llmSettingsStatus"),
+    notifySettingsButton: $("notifySettingsButton"),
+    notifySettingsDialog: $("notifySettingsDialog"), notifySettingsForm: $("notifySettingsForm"),
+    notifySettingsClose: $("notifySettingsClose"), notifySettingsCancel: $("notifySettingsCancel"),
+    notifyEnabled: $("notifyEnabled"), notifyServerUrl: $("notifyServerUrl"), notifyTopic: $("notifyTopic"),
+    notifyPriority: $("notifyPriority"), notifyWebhookUrl: $("notifyWebhookUrl"), notifyWebhookToken: $("notifyWebhookToken"),
+    notifyCooldown: $("notifyCooldown"), notifyClearToken: $("notifyClearToken"),
+    notifySettingsStatus: $("notifySettingsStatus"), notifyTestButton: $("notifyTestButton"),
+    themeSettingsButton: $("themeSettingsButton"), themeDialog: $("themeDialog"), themeClose: $("themeClose"),
+    themeColorMeta: document.querySelector('meta[name="theme-color"]'),
+    trafficSummaryDaily: $("trafficSummaryDaily"), trafficSummaryRanking: $("trafficSummaryRanking"),
+    trafficSummaryDaysLabel: $("trafficSummaryDaysLabel"), trafficSummaryRankLabel: $("trafficSummaryRankLabel"),
   };
 
   const topologyCardsKey = "netpulse.topologyCards";
@@ -202,6 +213,47 @@
   applyFontSize(document.documentElement.dataset.fontSize || "medium", false);
   fontSizeButtons.forEach((button) => button.addEventListener("click", () => applyFontSize(button.dataset.fontSize)));
 
+  const themeKey = "netpulse.theme";
+  const themeChoices = ["dark", "bright", "light", "midnight", "amber", "forest", "ocean", "sakura", "nebula", "solar", "mono"];
+  const themeSwatchButtons = [...document.querySelectorAll("[data-theme-choice]")];
+
+  function cssVarColor(name, fallback) {
+    try {
+      return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+    } catch (_) { return fallback; }
+  }
+
+  function withAlpha(color, alpha) {
+    const value = String(color || "");
+    const hex = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    if (hex) {
+      let digits = hex[1];
+      if (digits.length === 3) digits = [...digits].map((char) => char + char).join("");
+      return `rgba(${parseInt(digits.slice(0, 2), 16)},${parseInt(digits.slice(2, 4), 16)},${parseInt(digits.slice(4, 6), 16)},${alpha})`;
+    }
+    const rgb = value.match(/^rgb\(([^)]+)\)/);
+    if (rgb) {
+      const parts = rgb[1].split(/[\s,/]+/).filter(Boolean);
+      return `rgba(${parts.slice(0, 3).join(",")},${alpha})`;
+    }
+    return value;
+  }
+
+  function applyTheme(requestedTheme, persist = true) {
+    const theme = themeChoices.includes(requestedTheme) ? requestedTheme : "dark";
+    document.documentElement.dataset.theme = theme;
+    themeSwatchButtons.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.themeChoice === theme)));
+    if (persist) {
+      try { localStorage.setItem(themeKey, theme); } catch (_) { /* Storage can be disabled. */ }
+    }
+    if (elements.themeColorMeta) elements.themeColorMeta.setAttribute("content", cssVarColor("--bg", "#050a09"));
+    state.topologyScene?.refreshColors();
+    drawTraffic();
+  }
+
+  applyTheme(document.documentElement.dataset.theme || "dark", false);
+  themeSwatchButtons.forEach((button) => button.addEventListener("click", () => applyTheme(button.dataset.themeChoice)));
+
   async function apiError(response) {
     try {
       const body = await response.json();
@@ -335,7 +387,7 @@
     elements.gatewayLatency.textContent = network.gateway_latency_ms == null ? "NO RESPONSE" : `${Number(network.gateway_latency_ms).toFixed(1)} ms`;
     elements.healthScore.textContent = health || "—";
     elements.healthRing.style.strokeDashoffset = String(414.69 * (1 - health / 100));
-    elements.healthRing.style.stroke = health >= 85 ? "#9cffce" : health >= 65 ? "#ffb65c" : "#ff667a";
+    elements.healthRing.style.stroke = health >= 85 ? cssVarColor("--mint", "#9cffce") : health >= 65 ? cssVarColor("--orange", "#ffb65c") : cssVarColor("--danger", "#ff667a");
     elements.healthMessage.textContent = health >= 90 ? "すべての信号は良好です。" : health >= 75 ? "おおむね安定しています。" : health > 0 ? "注意が必要な信号があります。" : "テレメトリを取得しています…";
     elements.online.textContent = summary.online_devices ?? 0;
     elements.total.textContent = ` / ${summary.total_devices ?? 0}`;
@@ -359,7 +411,7 @@
     const percent = clamp(value, 0, 100);
     elements[name].textContent = `${percent.toFixed(1)}%`;
     elements[`${name}Bar`].style.width = `${percent}%`;
-    elements[`${name}Bar`].style.background = percent >= 90 ? "#ff667a" : percent >= 75 ? "#ffb65c" : "linear-gradient(90deg, #4ce7db, #9cffce)";
+    elements[`${name}Bar`].style.background = percent >= 90 ? cssVarColor("--danger", "#ff667a") : percent >= 75 ? cssVarColor("--orange", "#ffb65c") : `linear-gradient(90deg, ${cssVarColor("--cyan", "#4ce7db")}, ${cssVarColor("--mint", "#9cffce")})`;
     elements[`${name}Detail`].textContent = detail;
   }
 
@@ -532,6 +584,68 @@
       elements.llmClearApiKey.checked = false;
       elements.llmSettingsStatus.textContent = settings.api_key_configured ? "APIキーは暗号化して設定済みです。変更する場合だけ入力してください。" : "APIキーは未設定です。";
     } catch (error) { elements.llmSettingsStatus.textContent = `設定を読み込めません: ${error.message}`; }
+  }
+
+  async function loadNotifySettings() {
+    const response = await fetch("/api/v1/notify/settings");
+    if (!response.ok) throw new Error(await apiError(response));
+    return response.json();
+  }
+
+  async function openNotifySettings() {
+    elements.notifySettingsStatus.textContent = "設定を読み込んでいます…";
+    elements.notifySettingsDialog.showModal();
+    try {
+      const settings = await loadNotifySettings();
+      elements.notifyEnabled.checked = Boolean(settings.enabled);
+      elements.notifyServerUrl.value = settings.server_url || "";
+      elements.notifyTopic.value = settings.topic || "";
+      ensureSelectValue(elements.notifyPriority, String(settings.priority));
+      elements.notifyWebhookUrl.value = settings.webhook_url || "";
+      elements.notifyWebhookToken.value = "";
+      ensureSelectValue(elements.notifyCooldown, String(settings.cooldown_minutes));
+      elements.notifyClearToken.checked = false;
+      elements.notifySettingsStatus.textContent = settings.webhook_token_configured ? "Webhookトークンは暗号化して設定済みです。変更する場合だけ入力してください。" : "";
+    } catch (error) { elements.notifySettingsStatus.textContent = `設定を読み込めません: ${error.message}`; }
+  }
+
+  async function loadTrafficSummary(days) {
+    const range = Math.min(31, Math.max(1, Math.round(Number(days) || 7)));
+    try {
+      const [dailyResponse, rankResponse] = await Promise.all([
+        fetch(`/api/v1/summary/daily?days=${range}`),
+        fetch("/api/v1/summary/ranking?hours=24&limit=5"),
+      ]);
+      if (!dailyResponse.ok) throw new Error(await apiError(dailyResponse));
+      if (!rankResponse.ok) throw new Error(await apiError(rankResponse));
+      const dailyPayload = await dailyResponse.json();
+      const rankPayload = await rankResponse.json();
+      renderTrafficSummary(dailyPayload, rankPayload, range);
+    } catch (error) {
+      elements.trafficSummaryDaily.innerHTML = `<li class="summary-item error"><span>—</span><span class="summary-value">${escapeHtml(error.message)}</span></li>`;
+      elements.trafficSummaryRanking.innerHTML = "<li class='summary-rank-item'>読み込めませんでした</li>";
+    }
+  }
+
+  function renderTrafficSummary(dailyPayload, rankPayload, range) {
+    const days = dailyPayload.days || [];
+    elements.trafficSummaryDaysLabel.textContent = `LAST ${range} DAYS`;
+    if (!days.length) {
+      elements.trafficSummaryDaily.innerHTML = "<li class=\"summary-item empty\">データがありません</li>";
+    } else {
+      elements.trafficSummaryDaily.innerHTML = days.map((day) => {
+        const date = new Date(day.day + "T00:00:00");
+        const hours = day.peak_hour == null ? "—" : `${String(day.peak_hour).padStart(2, "0")}時台`;
+        return `<li class="summary-item"><span>${escapeHtml(new Intl.DateTimeFormat("ja-JP", { month: "short", day: "numeric" }).format(date))} · ${escapeHtml(hours)}</span><span class="summary-value">${escapeHtml(formatBytes(day.total_bytes))}<small> ↓${escapeHtml(formatBytes(day.rx_bytes))} ↑${escapeHtml(formatBytes(day.tx_bytes))}</small></span></li>`;
+      }).join("");
+    }
+    const items = rankPayload.items || [];
+    elements.trafficSummaryRankLabel.textContent = `LAST ${Number(rankPayload.hours) || 24}H`;
+    if (!items.length) {
+      elements.trafficSummaryRanking.innerHTML = "<li class='summary-rank-item empty'>データがありません</li>";
+    } else {
+      elements.trafficSummaryRanking.innerHTML = items.map((item, index) => `<li class="summary-rank-item"><span class="rank-index">${index + 1}</span><span class="rank-name">${escapeHtml(item.label)}</span><span class="rank-value">${escapeHtml(formatBytes(item.total_bytes))}</span></li>`).join("");
+    }
   }
 
   function setMiniStatus(element, value) {
@@ -910,8 +1024,10 @@
   function drawTraffic() {
     const { context: ctx, width, height } = sizeCanvas(elements.traffic);
     ctx.clearRect(0, 0, width, height);
+    const chartMint = cssVarColor("--mint", "#9cffce");
+    const chartViolet = cssVarColor("--violet", "#a78bfa");
     const padding = { x: 10, y: 12 }, chartWidth = width - padding.x * 2, chartHeight = height - padding.y * 2;
-    ctx.strokeStyle = "rgba(156,255,206,.07)"; ctx.lineWidth = 1;
+    ctx.strokeStyle = withAlpha(chartMint, 0.07); ctx.lineWidth = 1;
     for (let i = 0; i <= 4; i += 1) { const y = padding.y + chartHeight * i / 4; ctx.beginPath(); ctx.moveTo(padding.x, y); ctx.lineTo(width - padding.x, y); ctx.stroke(); }
     const maximum = Math.max(1024, ...state.rx, ...state.tx) * 1.18;
     const drawSeries = (values, color, fill) => {
@@ -923,8 +1039,8 @@
       ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y); points.slice(1).forEach((point, index) => { const previous = points[index]; const middle = (previous.x + point.x) / 2; ctx.bezierCurveTo(middle, previous.y, middle, point.y, point.x, point.y); });
       ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.shadowBlur = 6; ctx.shadowColor = color; ctx.stroke(); ctx.shadowBlur = 0;
     };
-    drawSeries(state.rx, "#9cffce", "rgba(156,255,206,.12)");
-    drawSeries(state.tx, "#a78bfa", "rgba(167,139,250,.06)");
+    drawSeries(state.rx, chartMint, withAlpha(chartMint, 0.12));
+    drawSeries(state.tx, chartViolet, withAlpha(chartViolet, 0.06));
   }
 
   async function loadInitial() {
@@ -1225,13 +1341,52 @@
   }
   applyTopologyCardSettings();
 
+  elements.notifySettingsButton.addEventListener("click", openNotifySettings);
+  elements.notifySettingsClose.addEventListener("click", () => elements.notifySettingsDialog.close());
+  elements.notifySettingsCancel.addEventListener("click", () => elements.notifySettingsDialog.close());
+  elements.themeSettingsButton.addEventListener("click", () => elements.themeDialog.showModal());
+  elements.themeClose.addEventListener("click", () => elements.themeDialog.close());
+  elements.notifyTestButton.addEventListener("click", async () => {
+    elements.notifyTestButton.disabled = true;
+    elements.notifySettingsStatus.textContent = "テスト通知を送信しています…";
+    try {
+      const response = await fetch("/api/v1/notify/test", { method: "POST" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.detail || await apiError(response));
+      elements.notifySettingsStatus.textContent = body.message || "テスト通知を送信しました。";
+    } catch (error) { elements.notifySettingsStatus.textContent = `テスト送信できません: ${error.message}`; }
+    finally { elements.notifyTestButton.disabled = false; }
+  });
+  elements.notifySettingsForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = {
+      enabled: elements.notifyEnabled.checked,
+      server_url: elements.notifyServerUrl.value.trim(),
+      topic: elements.notifyTopic.value.trim(),
+      priority: Number(elements.notifyPriority.value),
+      webhook_url: elements.notifyWebhookUrl.value.trim(),
+      cooldown_minutes: Number(elements.notifyCooldown.value),
+    };
+    if (elements.notifyClearToken.checked) payload.webhook_token = "";
+    else if (elements.notifyWebhookToken.value) payload.webhook_token = elements.notifyWebhookToken.value;
+    elements.notifySettingsStatus.textContent = "設定を保存しています…";
+    try {
+      const response = await fetch("/api/v1/notify/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      if (!response.ok) throw new Error(await apiError(response));
+      elements.notifySettingsStatus.textContent = "設定を保存しました。";
+      window.setTimeout(() => elements.notifySettingsDialog.close(), 650);
+    } catch (error) { elements.notifySettingsStatus.textContent = `保存できません: ${error.message}`; }
+  });
+
   window.setInterval(() => { elements.clock.textContent = new Intl.DateTimeFormat("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(new Date()); }, 1000);
   window.setInterval(() => { if (state.socket?.readyState === WebSocket.OPEN) state.socket.send("ping"); }, 20000);
   window.setInterval(loadLLMReports, 60000);
+  window.setInterval(() => loadTrafficSummary(7), 300000);
   window.setInterval(pollSnapshot, 5000);
   window.addEventListener("resize", drawTraffic);
 
   loadInitial();
   loadLLMReports();
+  loadTrafficSummary(7);
   connect();
 })();

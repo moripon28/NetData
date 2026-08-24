@@ -157,7 +157,28 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_agents_seen ON agent_nodes(last_seen DESC);
             CREATE INDEX IF NOT EXISTS idx_host_traffic_node_ts ON host_traffic_samples(node_id, ts DESC);
             CREATE INDEX IF NOT EXISTS idx_host_traffic_ts ON host_traffic_samples(ts DESC);
+            CREATE TABLE IF NOT EXISTS notify_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                enabled INTEGER NOT NULL DEFAULT 0,
+                server_url TEXT NOT NULL DEFAULT '',
+                topic TEXT NOT NULL DEFAULT '',
+                priority INTEGER NOT NULL DEFAULT 3,
+                webhook_url TEXT NOT NULL DEFAULT '',
+                webhook_token_encrypted TEXT NOT NULL DEFAULT '',
+                cooldown_minutes INTEGER NOT NULL DEFAULT 15,
+                updated_at REAL NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS notify_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts REAL NOT NULL,
+                channel TEXT NOT NULL,
+                status TEXT NOT NULL,
+                detail TEXT NOT NULL DEFAULT ''
+            );
+
             CREATE INDEX IF NOT EXISTS idx_llm_reports_created ON llm_reports(created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_notify_log_ts ON notify_log(ts DESC);
             """
         )
         llm_columns = {
@@ -626,6 +647,221 @@ class Database:
             await self._db().commit()
         return await self.llm_settings()
 
+    async def ensure_notify_settings(self, defaults: dict[str, Any]) -> None:
+        async with self._lock:
+            await self._db().execute(
+                """
+                INSERT OR IGNORE INTO notify_settings (
+                    id, enabled, server_url, topic, priority, webhook_url,
+                    webhook_token_encrypted, cooldown_minutes, updated_at
+                ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    int(bool(defaults.get("enabled"))), defaults.get("server_url", ""),
+                    defaults.get("topic", ""), int(defaults.get("priority", 3)),
+                    defaults.get("webhook_url", ""), defaults.get("webhook_token_encrypted", ""),
+                    int(defaults.get("cooldown_minutes", 15)), time.time(),
+                ),
+            )
+            await self._db().commit()
+
+    async def notify_settings(self) -> dict[str, Any]:
+        cursor = await self._db().execute("SELECT * FROM notify_settings WHERE id = 1")
+        row = await cursor.fetchone()
+        if row is None:
+            raise RuntimeError("Notification settings have not been initialized")
+        values = dict(row)
+        values["enabled"] = bool(values["enabled"])
+        values["priority"] = int(values["priority"])
+        values["cooldown_minutes"] = int(values["cooldown_minutes"])
+        return values
+
+    async def update_notify_settings(self, values: dict[str, Any]) -> dict[str, Any]:
+        allowed = {
+            "enabled", "server_url", "topic", "priority", "webhook_url",
+            "webhook_token_encrypted", "cooldown_minutes",
+        }
+        updates = {key: value for key, value in values.items() if key in allowed}
+        if not updates:
+            return await self.notify_settings()
+        updates["updated_at"] = time.time()
+        columns = ", ".join(f"{key} = ?" for key in updates)
+        params = [
+            int(value) if key in {"enabled", "priority", "cooldown_minutes"} else value
+            for key, value in updates.items()
+        ]
+        async with self._lock:
+            await self._db().execute(f"UPDATE notify_settings SET {columns} WHERE id = 1", params)
+            await self._db().commit()
+        return await self.notify_settings()
+
+    async def add_notify_log(self, channel: str, status: str, detail: str) -> None:
+        async with self._lock:
+            await self._db().execute(
+                "INSERT INTO notify_log (ts, channel, status, detail) VALUES (?, ?, ?, ?)",
+                (time.time(), channel, status, detail),
+            )
+            await self._db().commit()
+
+    async def notify_log(self, limit: int = 50) -> list[dict[str, Any]]:
+        cursor = await self._db().execute(
+            "SELECT * FROM notify_log ORDER BY ts DESC, id DESC LIMIT ?", (max(1, min(limit, 500)),)
+        )
+        return [dict(row) for row in await cursor.fetchall()]
+
+    @staticmethod
+    def _series_interval(first_ts: float, last_ts: float, count: int, fallback: float) -> float:
+        if count < 2 or last_ts <= first_ts:
+            return max(0.2, fallback)
+        return min(3600.0, max(0.2, (last_ts - first_ts) / (count - 1)))
+
+    async def daily_traffic_summary(self, days: int, fallback_interval: float = 2.0) -> dict[str, Any]:
+        days = max(1, min(days, 30))
+        since = time.time() - days * 86_400
+        local_rows: list[dict[str, Any]] = []
+        host_rows: list[dict[str, Any]] = []
+        cursor = await self._db().execute(
+            """
+            SELECT date(ts, 'unixepoch', 'localtime') AS day,
+                   CAST(strftime('%H', ts, 'unixepoch', 'localtime') AS INTEGER) AS hour,
+                   SUM(rx_bps) AS rx_sum, SUM(tx_bps) AS tx_sum,
+                   COUNT(*) AS cnt, MIN(ts) AS min_ts, MAX(ts) AS max_ts
+            FROM samples WHERE ts >= ?
+            GROUP BY day, hour
+            ORDER BY day, hour
+            """,
+            (since,),
+        )
+        local_rows = [dict(row) for row in await cursor.fetchall()]
+        cursor = await self._db().execute(
+            """
+            WITH base AS (
+                SELECT ts, hostname, source_ip, source_type, rx_bps, tx_bps,
+                       COALESCE(NULLIF(NULLIF(lower(source_ip), ''), lower(hostname)), 'unknown') AS identity,
+                       date(ts, 'unixepoch', 'localtime') AS day,
+                       CAST(strftime('%H', ts, 'unixepoch', 'localtime') AS INTEGER) AS hour
+                FROM host_traffic_samples
+                WHERE ts >= ?
+            ),
+            has_agent AS (
+                SELECT identity FROM base WHERE source_type = 'agent' GROUP BY identity
+            )
+            SELECT day, hour, SUM(rx_bps) AS rx_sum, SUM(tx_bps) AS tx_sum,
+                   COUNT(*) AS cnt, MIN(ts) AS min_ts, MAX(ts) AS max_ts
+            FROM base
+            WHERE source_type = 'agent'
+               OR (source_type != 'agent' AND identity NOT IN (SELECT identity FROM has_agent))
+            GROUP BY day, hour
+            ORDER BY day, hour
+            """,
+            (since,),
+        )
+        host_rows = [dict(row) for row in await cursor.fetchall()]
+
+        merged: dict[str, dict[str, Any]] = {}
+        for row in (*local_rows, *host_rows):
+            merged.setdefault(
+                row["day"],
+                {"day": row["day"], "rx_hours": [], "tx_hours": [], "rx": 0.0, "tx": 0.0, "cnt": 0, "min_ts": row["min_ts"], "max_ts": row["max_ts"]},
+            )
+            bucket = merged[row["day"]]
+            bucket["rx_hours"].append((row["hour"], row["rx_sum"] + row["tx_sum"]))
+            bucket["rx"] += row["rx_sum"]
+            bucket["tx"] += row["tx_sum"]
+            bucket["cnt"] += row["cnt"]
+            bucket["min_ts"] = min(bucket["min_ts"], row["min_ts"])
+            bucket["max_ts"] = max(bucket["max_ts"], row["max_ts"])
+
+        days_out: list[dict[str, Any]] = []
+        for day in sorted(merged):
+            bucket = merged[day]
+            interval = self._series_interval(bucket["min_ts"], bucket["max_ts"], bucket["cnt"], fallback_interval)
+            rx_bytes = round(bucket["rx"] * interval)
+            tx_bytes = round(bucket["tx"] * interval)
+            peak_hour = max(bucket["rx_hours"], key=lambda item: item[1])[0] if bucket["rx_hours"] else None
+            days_out.append(
+                {
+                    "day": day,
+                    "rx_bytes": rx_bytes,
+                    "tx_bytes": tx_bytes,
+                    "total_bytes": rx_bytes + tx_bytes,
+                    "peak_hour": peak_hour,
+                    "sample_count": bucket["cnt"],
+                }
+            )
+        return {"days": days_out, "fallback_sample_interval": fallback_interval}
+
+    async def device_traffic_ranking(self, hours: int, limit: int = 5, fallback_interval: float = 2.0) -> dict[str, Any]:
+        hours = max(1, min(hours, 24 * 31))
+        limit = max(1, min(limit, 20))
+        since = time.time() - hours * 3600
+
+        cursor = await self._db().execute(
+            """
+            WITH base AS (
+                SELECT ts, hostname, source_ip, source_type, rx_bps, tx_bps,
+                       COALESCE(NULLIF(NULLIF(lower(source_ip), ''), lower(hostname)), 'unknown') AS identity
+                FROM host_traffic_samples
+                WHERE ts >= ?
+            ),
+            has_agent AS (
+                SELECT identity FROM base WHERE source_type = 'agent' GROUP BY identity
+            )
+            SELECT identity, source_type,
+                   COALESCE(MAX(NULLIF(hostname, '')), MAX(NULLIF(source_ip, '')), identity) AS label,
+                   SUM(rx_bps) AS rx_sum, SUM(tx_bps) AS tx_sum,
+                   COUNT(*) AS cnt, MIN(ts) AS min_ts, MAX(ts) AS max_ts
+            FROM base
+            WHERE source_type = 'agent'
+               OR (source_type != 'agent' AND identity NOT IN (SELECT identity FROM has_agent))
+            GROUP BY identity
+            """,
+            (since,),
+        )
+        rows = [dict(row) for row in await cursor.fetchall()]
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            interval = self._series_interval(row["min_ts"], row["max_ts"], row["cnt"], fallback_interval)
+            rx_bytes = round(row["rx_sum"] * interval)
+            tx_bytes = round(row["tx_sum"] * interval)
+            items.append(
+                {
+                    "identity": row["identity"],
+                    "label": row["label"],
+                    "kind": row["source_type"],
+                    "rx_bytes": rx_bytes,
+                    "tx_bytes": tx_bytes,
+                    "total_bytes": rx_bytes + tx_bytes,
+                    "sample_count": row["cnt"],
+                }
+            )
+
+        cursor = await self._db().execute(
+            "SELECT SUM(rx_bps) AS rx_sum, SUM(tx_bps) AS tx_sum, COUNT(*) AS cnt, MIN(ts) AS min_ts, MAX(ts) AS max_ts FROM samples WHERE ts >= ?",
+            (since,),
+        )
+        local_row = dict(await cursor.fetchone())
+        if local_row["cnt"]:
+            interval = self._series_interval(
+                float(local_row["min_ts"]), float(local_row["max_ts"]), int(local_row["cnt"]), fallback_interval
+            )
+            rx_bytes = round(float(local_row["rx_sum"] or 0) * interval)
+            tx_bytes = round(float(local_row["tx_sum"] or 0) * interval)
+            items.append(
+                {
+                    "identity": "local",
+                    "label": "Raspberry Pi 5",
+                    "kind": "local",
+                    "rx_bytes": rx_bytes,
+                    "tx_bytes": tx_bytes,
+                    "total_bytes": rx_bytes + tx_bytes,
+                    "sample_count": int(local_row["cnt"]),
+                }
+            )
+
+        items.sort(key=lambda item: item["total_bytes"], reverse=True)
+        return {"hours": hours, "items": items[:limit]}
+
     async def save_llm_report(
         self,
         *,
@@ -706,4 +942,5 @@ class Database:
             await self._db().execute("DELETE FROM snmp_samples WHERE ts < ?", (cutoff,))
             await self._db().execute("DELETE FROM host_traffic_samples WHERE ts < ?", (cutoff,))
             await self._db().execute("DELETE FROM llm_reports WHERE created_at < ?", (cutoff,))
+            await self._db().execute("DELETE FROM notify_log WHERE ts < ?", (cutoff,))
             await self._db().commit()

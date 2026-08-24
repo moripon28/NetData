@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const COLORS = {
+  const THEME_COLOR_FALLBACKS = {
     mint: [0.612, 1, 0.808, 1],
     cyan: [0.298, 0.906, 0.859, 1],
     violet: [0.655, 0.545, 0.98, 1],
@@ -9,6 +9,38 @@
     danger: [1, 0.4, 0.478, 1],
     muted: [0.34, 0.43, 0.4, 1],
   };
+
+  const COLORS = { ...THEME_COLOR_FALLBACKS };
+
+  function parseCssColor(raw) {
+    const value = String(raw || "").trim();
+    if (!value) return null;
+    const hex = value.match(/^#([0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})$/i);
+    if (hex) {
+      let digits = hex[1];
+      if (digits.length === 3 || digits.length === 4) digits = [...digits].map((char) => char + char).join("");
+      return [
+        parseInt(digits.slice(0, 2), 16) / 255,
+        parseInt(digits.slice(2, 4), 16) / 255,
+        parseInt(digits.slice(4, 6), 16) / 255,
+        digits.length === 8 ? parseInt(digits.slice(6, 8), 16) / 255 : 1,
+      ];
+    }
+    const rgb = value.match(/^rgba?\(([^)]+)\)$/i);
+    if (rgb) {
+      const parts = rgb[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+      if (parts.length < 3 || parts.some((part) => Number.isNaN(part))) return null;
+      return [parts[0] / 255, parts[1] / 255, parts[2] / 255, parts[3] == null ? 1 : parts[3]];
+    }
+    return null;
+  }
+
+  function loadThemeColors() {
+    const styles = getComputedStyle(document.documentElement);
+    Object.keys(THEME_COLOR_FALLBACKS).forEach((key) => {
+      COLORS[key] = parseCssColor(styles.getPropertyValue(`--${key}`)) || THEME_COLOR_FALLBACKS[key];
+    });
+  }
 
   const TAU = Math.PI * 2;
   const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
@@ -114,7 +146,7 @@
   }
 
   function colorCss(color) {
-    return color.slice(0, 3).map((value) => Math.round(value * 255)).join(",");
+    return `rgb(${color.slice(0, 3).map((value) => Math.round(value * 255)).join(",")})`;
   }
 
   function compactRateLabel(value) {
@@ -1043,6 +1075,12 @@
       if (selectedId) select(selectedId);
     }
 
+    function refreshColors() {
+      loadThemeColors();
+      buildLabels();
+      if (selectedId) select(selectedId);
+    }
+
     const interactionSurface = canvas.parentElement || canvas;
 
     function beginPointerInteraction(event) {
@@ -1119,12 +1157,14 @@
     canvas.addEventListener("wheel", zoomCamera, { passive: false });
     canvas.addEventListener("dblclick", resetCamera);
 
+    refreshColors();
     frame = window.requestAnimationFrame(render);
     return {
       setNodes,
       select,
       setCardConfig,
       resetCamera,
+      refreshColors,
       get mode() { return webglReady ? "webgl" : "fallback"; },
       destroy() {
         window.cancelAnimationFrame(frame);

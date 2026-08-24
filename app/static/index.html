@@ -9,17 +9,36 @@
   <script>
     (() => {
       const sizes = ["small", "medium", "large", "xlarge"];
+      const themes = ["dark", "bright", "light", "midnight", "amber", "forest", "ocean", "sakura", "nebula", "solar", "mono"];
       try {
-        const stored = localStorage.getItem("netpulse.fontSize");
-        document.documentElement.dataset.fontSize = sizes.includes(stored) ? stored : "medium";
+        const storedSize = localStorage.getItem("netpulse.fontSize");
+        document.documentElement.dataset.fontSize = sizes.includes(storedSize) ? storedSize : "medium";
+        const storedTheme = localStorage.getItem("netpulse.theme");
+        document.documentElement.dataset.theme = themes.includes(storedTheme) ? storedTheme : "dark";
       } catch (_) {
         document.documentElement.dataset.fontSize = "medium";
+        document.documentElement.dataset.theme = "dark";
       }
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=20260822-flavor-big">
+  <link rel="stylesheet" href="/static/styles.css?v=20260823-themes">
 </head>
 <body>
+  <div class="boot" aria-hidden="true">
+    <div class="boot__scan"></div>
+    <div class="boot__grid"></div>
+    <div class="boot__log" id="bootLog"></div>
+    <div class="boot__meta">
+      <span>RP5 NODE · 192.168.10.201</span>
+      <span><span class="boot__track"><i id="bootBar"></i></span><b id="bootPercent">0%</b></span>
+    </div>
+    <div class="boot__title" id="bootTitle" aria-hidden="true">
+      <small>HOME NETWORK OBSERVATORY</small>
+      <strong>NET<em>PULSE</em></strong>
+      <small>LOCAL FIRST · YOUR DATA STAYS HOME</small>
+    </div>
+    <div class="boot__skip">CLICK OR KEY TO SKIP</div>
+  </div>
   <div class="ambient ambient-a" aria-hidden="true"></div>
   <div class="ambient ambient-b" aria-hidden="true"></div>
   <div class="noise" aria-hidden="true"></div>
@@ -37,6 +56,8 @@
         <button type="button" data-font-size="large" aria-label="文字サイズ 大">大</button>
         <button type="button" data-font-size="xlarge" aria-label="文字サイズ 特大">特大</button>
       </div>
+      <button class="topbar-action" id="themeSettingsButton" type="button">THEME</button>
+      <button class="topbar-action" id="notifySettingsButton" type="button">ALERTS</button>
       <button class="topbar-action" id="llmSettingsButton" type="button">LLM SETTINGS</button>
       <div class="live-pill" id="connectionPill"><span></span><b>CONNECTING</b></div>
       <time id="clock">--:--:--</time>
@@ -220,9 +241,26 @@
         </div>
       </article>
 
+      <article class="panel traffic-summary-panel">
+        <header class="panel-head">
+          <div><span class="panel-index">07</span><h2>TRAFFIC SUMMARY</h2></div>
+          <span class="panel-kicker">DAILY TOTALS · PEAK HOUR · TOP FLEET</span>
+        </header>
+        <div class="traffic-summary-grid">
+          <section class="summary-daily">
+            <header><b>DAILY TOTALS</b><span id="trafficSummaryDaysLabel">LAST 7 DAYS</span></header>
+            <div class="summary-daily-list" id="trafficSummaryDaily"></div>
+          </section>
+          <section class="summary-ranking">
+            <header><b>TOP DEVICES</b><span id="trafficSummaryRankLabel">LAST 24H</span></header>
+            <ol class="summary-rank-list" id="trafficSummaryRanking"></ol>
+          </section>
+        </div>
+      </article>
+
       <article class="panel devices-panel">
         <header class="panel-head devices-head">
-          <div><span class="panel-index">07</span><h2>CONNECTED UNIVERSE</h2></div>
+          <div><span class="panel-index">08</span><h2>CONNECTED UNIVERSE</h2></div>
           <div class="device-controls">
             <label class="search"><span>⌕</span><input id="deviceSearch" type="search" placeholder="端末を検索" aria-label="端末を検索"></label>
             <button class="filter active" data-filter="all">ALL</button>
@@ -235,7 +273,7 @@
 
       <article class="panel events-panel">
         <header class="panel-head">
-          <div><span class="panel-index">08</span><h2>SIGNAL LOG</h2></div>
+          <div><span class="panel-index">09</span><h2>SIGNAL LOG</h2></div>
           <span class="event-count" id="eventCount">0 EVENTS</span>
         </header>
         <div class="event-list" id="eventList"><p class="empty-events">イベントを待っています…</p></div>
@@ -346,7 +384,50 @@
     </form>
   </dialog>
 
-  <script src="/static/topology3d.js?v=20260821-md-report" defer></script>
-  <script src="/static/app.js?v=20260821-md-report" defer></script>
+  <dialog id="notifySettingsDialog" class="settings-dialog">
+    <form id="notifySettingsForm">
+      <div class="dialog-head"><div><small>PUSH NOTIFICATIONS</small><h2>アラート通知</h2></div><button id="notifySettingsClose" type="button" aria-label="閉じる">×</button></div>
+      <label class="trust-toggle"><input id="notifyEnabled" type="checkbox"><span></span>アラート時にプッシュ通知を送信する</label>
+      <div class="form-grid">
+        <label class="field-wide">ntfyサーバーURL<input id="notifyServerUrl" type="url" maxlength="500" placeholder="例: http://192.168.10.x:23710（ローカルntfy）または https://ntfy.sh"></label>
+        <label>トピック<input id="notifyTopic" maxlength="100" placeholder="例: netpulse"></label>
+        <label>優先度<select id="notifyPriority"><option value="1">最低 (1)</option><option value="2">低 (2)</option><option value="3">標準 (3)</option><option value="4">高 (4)</option><option value="5">最優先 (5)</option></select></label>
+        <label class="field-wide">Webhook URL（代替チャネル）<input id="notifyWebhookUrl" type="url" maxlength="500" placeholder="例: http://192.168.10.x/hook"></label>
+        <label class="field-wide">Webhookトークン（任意）<input id="notifyWebhookToken" type="password" maxlength="2000" autocomplete="new-password" placeholder="保存済みの値は表示しません"></label>
+        <label>クールダウン<select id="notifyCooldown"><option value="1">1分</option><option value="5">5分</option><option value="15">15分</option><option value="30">30分</option><option value="60">60分</option><option value="1440">24時間</option></select></label>
+      </div>
+      <label class="trust-toggle clear-secret"><input id="notifyClearToken" type="checkbox"><span></span>保存済みWebhookトークンを削除する</label>
+      <p class="form-hint">ntfy（URLとトピック）またはWebhook URLのいずれかを設定すると有効になります。端末の離線・検出、閾値超え、異常検知、接続状態変化をお知らせします。「優先度」はntfyの優先度です。クールダウン中は同じタイトルの通知を省略します。</p>
+      <p class="form-status" id="notifySettingsStatus" role="status"></p>
+      <div class="dialog-actions">
+        <button id="notifyTestButton" type="button" class="secondary-action">TEST SEND</button>
+        <button id="notifySettingsCancel" type="button" class="cancel">CANCEL</button>
+        <button type="submit" class="save">SAVE SETTINGS</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="themeDialog" class="settings-dialog">
+    <div class="theme-dialog-body">
+      <div class="dialog-head"><div><small>APPEARANCE</small><h2>カラーテーマ</h2></div><button id="themeClose" type="button" aria-label="閉じる">×</button></div>
+      <div class="theme-picker" role="group" aria-label="カラーテーマ一覧">
+        <button type="button" class="theme-swatch" data-theme-choice="dark" style="--sw-bg:#050a09;--sw-a:#9cffce;--sw-b:#4ce7db;--sw-c:#a78bfa" aria-pressed="false"><span class="theme-swatch__preview"></span><span class="theme-swatch__label">標準ダーク</span></button>
+        <button type="button" class="theme-swatch" data-theme-choice="bright" style="--sw-bg:#111c19;--sw-a:#a8ffd6;--sw-b:#5ff2e6;--sw-c:#b79cff" aria-pressed="false"><span class="theme-swatch__preview"></span><span class="theme-swatch__label">ブライトダーク</span></button>
+        <button type="button" class="theme-swatch" data-theme-choice="light" style="--sw-bg:#f0f7f3;--sw-a:#0e8a63;--sw-b:#0f8a80;--sw-c:#6d4fc9" aria-pressed="false"><span class="theme-swatch__preview"></span><span class="theme-swatch__label">ライト</span></button>
+        <button type="button" class="theme-swatch" data-theme-choice="midnight" style="--sw-bg:#060a14;--sw-a:#6f8bff;--sw-b:#59c2ff;--sw-c:#8f7bff" aria-pressed="false"><span class="theme-swatch__preview"></span><span class="theme-swatch__label">ミッドナイト</span></button>
+        <button type="button" class="theme-swatch" data-theme-choice="amber" style="--sw-bg:#100b04;--sw-a:#ffcf6f;--sw-b:#ffb84d;--sw-c:#ff9e6f" aria-pressed="false"><span class="theme-swatch__preview"></span><span class="theme-swatch__label">アンバー</span></button>
+        <button type="button" class="theme-swatch" data-theme-choice="forest" style="--sw-bg:#05100a;--sw-a:#5cff9e;--sw-b:#4de8c0;--sw-c:#6fd8a8" aria-pressed="false"><span class="theme-swatch__preview"></span><span class="theme-swatch__label">フォレスト</span></button>
+        <button type="button" class="theme-swatch" data-theme-choice="ocean" style="--sw-bg:#04101a;--sw-a:#5cd8ff;--sw-b:#4db8ff;--sw-c:#7f9eff" aria-pressed="false"><span class="theme-swatch__preview"></span><span class="theme-swatch__label">オーシャン</span></button>
+        <button type="button" class="theme-swatch" data-theme-choice="sakura" style="--sw-bg:#12060c;--sw-a:#ff9ecb;--sw-b:#ff7fb8;--sw-c:#c98aff" aria-pressed="false"><span class="theme-swatch__preview"></span><span class="theme-swatch__label">サクラ</span></button>
+        <button type="button" class="theme-swatch" data-theme-choice="nebula" style="--sw-bg:#0d0616;--sw-a:#c99eff;--sw-b:#a88aff;--sw-c:#8f6bff" aria-pressed="false"><span class="theme-swatch__preview"></span><span class="theme-swatch__label">ネビュラ</span></button>
+        <button type="button" class="theme-swatch" data-theme-choice="solar" style="--sw-bg:#121004;--sw-a:#ffe94d;--sw-b:#ffd84d;--sw-c:#ffb84d" aria-pressed="false"><span class="theme-swatch__preview"></span><span class="theme-swatch__label">ソーラー</span></button>
+        <button type="button" class="theme-swatch" data-theme-choice="mono" style="--sw-bg:#0a0a0a;--sw-a:#ffffff;--sw-b:#d0d0d0;--sw-c:#e8e8e8" aria-pressed="false"><span class="theme-swatch__preview"></span><span class="theme-swatch__label">モノクロ</span></button>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="/static/topology3d.js?v=20260823-themes" defer></script>
+  <script src="/static/app.js?v=20260823-themes" defer></script>
+  <script src="/static/boot.js?v=20260823-boot" defer></script>
 </body>
 </html>

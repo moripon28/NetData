@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import logging
 import math
 import random
 import time
@@ -18,14 +19,24 @@ from app.config import Settings
 from app.database import Database
 
 
+logger = logging.getLogger(__name__)
+
+
 Broadcast = Callable[[dict[str, Any]], Awaitable[None]]
 
 
 class MonitorService:
-    def __init__(self, settings: Settings, database: Database, broadcast: Broadcast | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        database: Database,
+        broadcast: Broadcast | None = None,
+        notifier: Any | None = None,
+    ) -> None:
         self.settings = settings
         self.database = database
         self.broadcast = broadcast
+        self.notifier = notifier
         self.system = SystemCollector()
         self.traffic = TrafficCollector(settings.preferred_interface)
         self.discovery = DeviceDiscovery()
@@ -112,7 +123,7 @@ class MonitorService:
         self._running = True
         await self.database.cleanup(self.settings.retention_days)
         self._last_cleanup = time.time()
-        await self.database.add_event(
+        await self._record_event(
             "info",
             "system",
             "NetPulse started",
@@ -172,7 +183,7 @@ class MonitorService:
             anomaly_state, anomaly_events = await self.anomaly.observe(sample, self.connectivity_latest)
             self._last_anomaly_observation = time.time()
             for item in anomaly_events:
-                await self.database.add_event(
+                await self._record_event(
                     "warning",
                     "anomaly",
                     f"Unusual {item['label']}",
@@ -439,7 +450,7 @@ class MonitorService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # Keep monitoring alive; report the specific failure in the UI.
-                await self.database.add_event("error", "collector", "Collection failed", str(exc)[:500])
+                await self._record_event("error", "collector", "Collection failed", str(exc)[:500])
             elapsed = time.monotonic() - started
             await asyncio.sleep(max(0.1, self.settings.sample_interval - elapsed))
 
@@ -456,7 +467,7 @@ class MonitorService:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                await self.database.add_event("warning", "discovery", "Device scan failed", str(exc)[:500])
+                await self._record_event("warning", "discovery", "Device scan failed", str(exc)[:500])
             await asyncio.sleep(self.settings.discovery_interval)
 
     async def _connectivity_loop(self) -> None:
@@ -497,7 +508,7 @@ class MonitorService:
                 }
                 if status != self._connectivity_status and self._connectivity_status != "checking":
                     severity = "success" if status == "online" else "warning"
-                    await self.database.add_event(
+                    await self._record_event(
                         severity,
                         "connectivity",
                         f"Network probe status changed to {status}",
@@ -508,7 +519,7 @@ class MonitorService:
                 raise
             except Exception as exc:
                 self.connectivity_latest.update({"status": "error", "updated_at": time.time()})
-                await self.database.add_event("warning", "connectivity", "Connectivity checks failed", str(exc)[:500])
+                await self._record_event("warning", "connectivity", "Connectivity checks failed", str(exc)[:500])
             await asyncio.sleep(self.settings.connectivity_interval)
 
     async def _snmp_loop(self) -> None:
@@ -534,7 +545,7 @@ class MonitorService:
                 }
                 if status != self._snmp_status and self._snmp_status != "checking":
                     severity = "success" if status == "ok" else "warning"
-                    await self.database.add_event(
+                    await self._record_event(
                         severity,
                         "snmp",
                         f"SNMP status changed to {status}",
@@ -545,7 +556,7 @@ class MonitorService:
                 raise
             except Exception as exc:
                 self.snmp_latest.update({"status": "error", "updated_at": time.time()})
-                await self.database.add_event("warning", "snmp", "SNMP collection failed", str(exc)[:500])
+                await self._record_event("warning", "snmp", "SNMP collection failed", str(exc)[:500])
             await asyncio.sleep(self.settings.snmp_interval)
 
     async def collect_exporters_once(self) -> dict[str, Any]:
@@ -574,7 +585,7 @@ class MonitorService:
         }
         if status != self._exporter_status and self._exporter_status not in {"checking", "disabled"}:
             severity = "success" if status == "ok" else "warning"
-            await self.database.add_event(
+            await self._record_event(
                 severity,
                 "exporter",
                 f"Prometheus exporter status changed to {status}",
@@ -591,7 +602,7 @@ class MonitorService:
                 raise
             except Exception as exc:
                 self.exporters_latest.update({"status": "error", "updated_at": time.time()})
-                await self.database.add_event(
+                await self._record_event(
                     "warning", "exporter", "Prometheus exporter collection failed", str(exc)[:500]
                 )
             await asyncio.sleep(self.settings.prometheus_exporter_interval)
@@ -600,6 +611,17 @@ class MonitorService:
     def _average_latency(checks: list[dict[str, Any]]) -> float | None:
         values = [float(item["latency_ms"]) for item in checks if item.get("latency_ms") is not None]
         return round(sum(values) / len(values), 2) if values else None
+
+    async def _record_event(
+        self, severity: str, category: str, title: str, detail: str, metadata: dict[str, Any] | None = None
+    ) -> None:
+        await self.database.add_event(severity, category, title, detail, metadata)
+        if self.notifier is None:
+            return
+        try:
+            await self.notifier.notify(severity, category, title, detail, metadata)
+        except Exception:  # Delivery is best-effort; monitoring must keep running.
+            logger.warning("notification failed", exc_info=True)
 
     async def _refresh_neighbours(self) -> None:
         if self.settings.demo_mode:
@@ -613,16 +635,16 @@ class MonitorService:
         stale = await self.database.mark_stale_devices(time.time() - self._device_stale_after)
         for device in stale:
             label = device.get("display_name") or device.get("hostname") or device["ip"]
-            await self.database.add_event("warning", "device", "Device went offline", f"{label} is no longer reachable.", {"ip": device["ip"]})
+            await self._record_event("warning", "device", "Device went offline", f"{label} is no longer reachable.", {"ip": device["ip"]})
 
     async def _register_device(self, device: dict[str, Any]) -> None:
         is_new, previous = await self.database.upsert_device(device)
         if is_new:
-            await self.database.add_event(
+            await self._record_event(
                 "info", "device", "New device detected", f"First observed {device['ip']} on the local network.", {"ip": device["ip"], "mac": device.get("mac")}
             )
         elif previous == "offline" and device.get("status") == "online":
-            await self.database.add_event("success", "device", "Device is back online", f"{device['ip']} responded again.", {"ip": device["ip"]})
+            await self._record_event("success", "device", "Device is back online", f"{device['ip']} responded again.", {"ip": device["ip"]})
 
     def _is_monitored_ip(self, address: str) -> bool:
         if self._network is None:
@@ -645,7 +667,7 @@ class MonitorService:
         for key, value, limit, title in thresholds:
             if value >= limit and now - self._last_thresholds.get(key, 0) > 300:
                 self._last_thresholds[key] = now
-                await self.database.add_event("warning", "threshold", title, f"Observed {value:.1f}; threshold is {limit:.1f}.")
+                await self._record_event("warning", "threshold", title, f"Observed {value:.1f}; threshold is {limit:.1f}.")
 
     def _health_score(self, sample: dict[str, Any]) -> int:
         score = 100.0

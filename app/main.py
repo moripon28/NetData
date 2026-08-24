@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from app.config import Settings, validate_agent_token, validate_web_auth
 from app.database import Database
 from app.llm import LLMConnectionError, LLMReporter, ReportInProgressError
+from app.notify import NotificationService
 from app.service import MonitorService
 
 
@@ -73,6 +74,16 @@ class LLMSettingsUpdate(BaseModel):
 class LLMModelsRequest(BaseModel):
     base_url: str = Field(min_length=8, max_length=500)
     api_key: str | None = Field(default=None, max_length=2_000)
+
+
+class NotifySettingsUpdate(BaseModel):
+    enabled: bool | None = None
+    server_url: str | None = Field(default=None, max_length=500)
+    topic: str | None = Field(default=None, max_length=100)
+    priority: int | None = Field(default=None, ge=1, le=5)
+    webhook_url: str | None = Field(default=None, max_length=500)
+    webhook_token: str | None = Field(default=None, max_length=2_000)
+    cooldown_minutes: int | None = Field(default=None, ge=1, le=43_200)
 
 
 class WebSocketHub:
@@ -136,12 +147,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     check_basic = build_basic_auth_checker(resolved.web_auth_user, resolved.web_auth_password)
     hub = WebSocketHub()
     database = Database(resolved.database_path)
-    service = MonitorService(resolved, database, hub.broadcast)
-    reporter = LLMReporter(resolved, database, service.snapshot)
+    notifier = NotificationService(resolved, database)
+    service = MonitorService(resolved, database, hub.broadcast, notifier=notifier)
+    reporter = LLMReporter(resolved, database, service.snapshot, notifier=notifier)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         await database.connect()
+        await notifier.initialize()
         await reporter.initialize()
         await service.start()
         await reporter.start()
@@ -155,6 +168,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.database = database
     app.state.monitor = service
     app.state.llm_reporter = reporter
+    app.state.notifier = notifier
 
     if auth_enabled:
         exempt_paths = {"/api/health", "/api/v1/agent/heartbeat"}
@@ -191,7 +205,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.middleware("http")
     async def no_cache_for_ui(request: Request, call_next):
         response = await call_next(request)
-        if request.url.path == "/" or request.url.path.startswith("/static/"):
+        if (
+            (request.url.path == "/" or request.url.path.startswith("/static/"))
+            and "Cache-Control" not in response.headers
+        ):
             response.headers["Cache-Control"] = "no-cache"
         return response
 
@@ -282,6 +299,43 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         except LLMConnectionError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.get("/api/v1/notify/settings")
+    async def notify_settings() -> dict[str, Any]:
+        return await notifier.public_settings()
+
+    @app.put("/api/v1/notify/settings")
+    async def update_notify_settings(update: NotifySettingsUpdate) -> dict[str, Any]:
+        values = update.model_dump(exclude_unset=True)
+        if not values:
+            raise HTTPException(status_code=400, detail="No settings to update")
+        try:
+            return await notifier.update_settings(values)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @app.post("/api/v1/notify/test")
+    async def test_notification() -> dict[str, Any]:
+        try:
+            return await notifier.test_notification()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.get("/api/v1/notify/log")
+    async def notify_log(limit: int = Query(50, ge=1, le=500)) -> dict[str, Any]:
+        return {"items": await notifier.log(limit)}
+
+    @app.get("/api/v1/summary/daily")
+    async def summary_daily(days: int = Query(7, ge=1, le=30)) -> dict[str, Any]:
+        return await database.daily_traffic_summary(days, resolved.sample_interval)
+
+    @app.get("/api/v1/summary/ranking")
+    async def summary_ranking(
+        hours: int = Query(24, ge=1, le=744), limit: int = Query(5, ge=1, le=20)
+    ) -> dict[str, Any]:
+        return await database.device_traffic_ranking(hours, limit, resolved.sample_interval)
 
     @app.get("/api/v1/connectivity")
     async def connectivity(minutes: int = Query(60, ge=1, le=43_200)) -> dict[str, Any]:
