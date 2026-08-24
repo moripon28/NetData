@@ -286,6 +286,11 @@
     const SPHERE_ONLY_ROLES = new Set(["core"]);
     const gl = canvas.getContext("webgl", { alpha: true, antialias: true, premultipliedAlpha: false, powerPreference: "high-performance" });
     const context2d = gl ? null : canvas.getContext("2d");
+    const reticleEl = canvas.parentElement?.querySelector(".topology-reticle") || null;
+    let reticleMetrics = { load: 0, pulse: 0 };
+    let lastReticleAt = 0;
+    let lastReticleLoad = -1;
+    let lastReticlePulse = -1;
     let lineProgram = null;
     let pointProgram = null;
     let meshProgram = null;
@@ -530,6 +535,19 @@
         if (!node.orbitRadius) return;
         node.position = orbitPosition(node, phaseFor(node).orbitAngle);
       });
+      {
+        let activitySum = 0;
+        let loadSum = 0;
+        let onlineCount = 0;
+        nodes.forEach((node) => {
+          if (OFFLINE_STATUSES.includes(String(node.status || "unknown").toLowerCase())) return;
+          activitySum += clamp(Number(node.activityLevel) || 0.12, 0.05, 1);
+          loadSum += clamp(Number(node.loadLevel) || 0, 0, 1);
+          onlineCount += 1;
+        });
+        const networkPulse = onlineCount ? clamp((activitySum / onlineCount) * 0.65 + (loadSum / onlineCount) * 0.35, 0, 1) : 0;
+        reticleMetrics = { load: onlineCount ? clamp(loadSum / onlineCount, 0, 1) : 0, pulse: networkPulse };
+      }
       const view = {
         yaw: yawOffset + worldYawDrift,
         pitch: pitchOffset,
@@ -920,12 +938,34 @@
       });
     }
 
+    const RETICLE_MIN_SPIN = 10;
+    const RETICLE_MAX_SPIN = 110;
+    const RETICLE_MIN_SWEEP = 2.4;
+    const RETICLE_MAX_SWEEP = 11;
+    const RETICLE_UPDATE_INTERVAL_MS = 250;
+
+    function updateReticle(now) {
+      if (!reticleEl) return;
+      if (now - lastReticleAt < RETICLE_UPDATE_INTERVAL_MS) return;
+      const load = clamp(reticleMetrics.load || 0, 0, 1);
+      const pulse = clamp(reticleMetrics.pulse || 0, 0, 1);
+      if (Math.abs(load - lastReticleLoad) < 0.015 && Math.abs(pulse - lastReticlePulse) < 0.02) return;
+      lastReticleLoad = load;
+      lastReticlePulse = pulse;
+      lastReticleAt = now;
+      const [r, g, b, a] = loadColor(load);
+      reticleEl.style.setProperty("--ret-color", load > 0.02 ? `rgba(${Math.round(r * 255)}, ${Math.round(g * 255)}, ${Math.round(b * 255)}, ${a})` : "var(--cyan)");
+      reticleEl.style.setProperty("--ret-spin", `${(RETICLE_MAX_SPIN - load * (RETICLE_MAX_SPIN - RETICLE_MIN_SPIN)).toFixed(1)}s`);
+      reticleEl.style.setProperty("--ret-sweep", `${(RETICLE_MAX_SWEEP - pulse * (RETICLE_MAX_SWEEP - RETICLE_MIN_SWEEP)).toFixed(2)}s`);
+    }
+
     function render(now) {
       const fps = reducedMotion.matches ? 12 : 30;
       if (!document.hidden && now - lastFrameAt >= 1000 / fps) {
         const size = dimensions();
         const scene = buildScene(now, size);
         if (webglReady) drawWebgl(scene, size, now); else drawFallback(scene, size);
+        updateReticle(now);
         updateLabelPositions(size, now);
         renderedFrames += 1;
         if (!lastStatsAt) lastStatsAt = now;
