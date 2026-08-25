@@ -32,7 +32,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "EASY SETUP" in index.text
         assert "RAW WEBGL" in index.text
         assert "SPATIAL TELEMETRY" in index.text
-        assert 'src="/static/topology3d.js?v=20260823-themes"' in index.text
+        assert 'src="/static/topology3d.js?v=20260824-reticle-live"' in index.text
         assert 'src="/static/app.js?v=20260823-themes"' in index.text
         assert 'data-font-size="small"' in index.text
         assert 'data-font-size="medium"' in index.text
@@ -52,7 +52,7 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'id="topologyCardLimit"' in index.text
         assert "MANAGE" in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
-        assert '/static/styles.css?v=20260823-themes' in index.text
+        assert '/static/styles.css?v=20260824-reticle-live' in index.text
         assert '/static/app.js?v=20260823-themes' in index.text
         assert "TRAFFIC LOW → SURGE" in index.text
         assert '<div class="health-value"><strong id="healthScore">--</strong></div>' in index.text
