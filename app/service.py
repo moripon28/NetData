@@ -671,18 +671,18 @@ class MonitorService:
 
     def _health_score(self, sample: dict[str, Any]) -> int:
         score = 100.0
-        score -= max(0.0, sample["cpu_percent"] - 65) * 0.45
-        score -= max(0.0, sample["memory_percent"] - 70) * 0.45
-        score -= max(0.0, sample["disk_percent"] - 80) * 0.7
+        score -= max(0.0, sample["cpu_percent"] - 35) * 0.5
+        score -= max(0.0, sample["memory_percent"] - 50) * 0.4
+        score -= max(0.0, sample["disk_percent"] - 60) * 0.6
         temperature = sample.get("temperature_c")
         if temperature is not None:
-            score -= max(0.0, temperature - 65) * 1.1
+            score -= max(0.0, temperature - 45) * 1.0
         latency = sample.get("gateway_latency_ms")
         if latency is None and self.gateway:
             score -= 25
         elif latency is not None:
-            score -= max(0.0, latency - 25) * 0.18
-        score -= min(25.0, sample.get("packet_loss_percent", 0) * 0.5)
+            score -= max(0.0, latency - 10) * 0.15
+        score -= min(25.0, max(0.0, sample.get("packet_loss_percent", 0) - 0.5) * 1.0)
         if self.connectivity_latest["status"] == "offline":
             score -= 25
         elif self.connectivity_latest["status"] in {"degraded", "error"}:
