@@ -1,3 +1,7 @@
+import inspect
+import re
+import sys
+
 from app.collectors.connectivity import ConnectivityCollector, parse_lan_probe_targets
 from app.collectors.network import TrafficCollector
 from app.collectors.prometheus import PrometheusExporterCollector, parse_exporter_targets, parse_prometheus_text
@@ -181,6 +185,19 @@ def test_qnap_queries_do_not_request_serial_number_oids():
     assert f"{QNAP_STORAGE}.2.1.5" not in {
         oid for columns in _qnap_table_columns().values() for oid in columns
     }
+
+
+def test_qnap_query_covers_every_scalar_read_by_snapshot():
+    module = sys.modules["app.collectors.snmp"]
+    constants = {name: getattr(module, name) for name in ("QNAP_SYSTEM", "QNAP_STORAGE", "QNAP_EXTERNAL")}
+    requested = set(_qnap_scalar_oids())
+    requested.update(oid for columns in _qnap_table_columns().values() for oid in columns)
+    pattern = re.compile(r'value\(\s*f"\{(QNAP_SYSTEM|QNAP_STORAGE|QNAP_EXTERNAL|column)\}([^"]*)"\s*[,)]')
+    for func in (module._build_qnap_snapshot, module._qnap_samples, module._qnap_warnings):
+        for name, suffix in pattern.findall(inspect.getsource(func)):
+            if name == "column":
+                continue
+            assert constants[name] + suffix in requested, f"{name} OID{suffix} is read but never queried"
 
 
 def test_prometheus_node_exporter_metrics_are_normalized(monkeypatch):

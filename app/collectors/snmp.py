@@ -479,10 +479,37 @@ def _is_local_target(target: str) -> bool:
 
 
 def _qnap_scalar_oids() -> tuple[str, ...]:
-    # TS-464/QTS 5.2 reliably exposes its model here. Other scalar objects in
-    # the downloaded MIB may be absent and time out rather than return a
-    # noSuchInstance response, so system health is taken from the tables below.
-    return (f"{QNAP_SYSTEM}.3.0",)
+    # Every scalar that _build_qnap_snapshot reads. PysnmpSession.query fetches
+    # the identity objects one by one, so an OID absent on a given model
+    # (reported as noSuchInstance or a per-variable PDU error) is skipped
+    # without discarding the remaining system health values.
+    return (
+        # Identity
+        f"{QNAP_SYSTEM}.3.0",
+        f"{QNAP_SYSTEM}.4.0",
+        f"{QNAP_SYSTEM}.6.0",
+        # System health
+        f"{QNAP_SYSTEM}.10.0",
+        f"{QNAP_SYSTEM}.11.0",
+        f"{QNAP_SYSTEM}.12.0",
+        f"{QNAP_SYSTEM}.13.0",
+        f"{QNAP_SYSTEM}.14.0",
+        f"{QNAP_SYSTEM}.15.0",
+        f"{QNAP_SYSTEM}.16.0",
+        f"{QNAP_SYSTEM}.19.0",
+        f"{QNAP_SYSTEM}.20.0",
+        f"{QNAP_SYSTEM}.21.0",
+        # SSD cache
+        f"{QNAP_STORAGE}.10.0",
+        f"{QNAP_STORAGE}.11.0",
+        f"{QNAP_STORAGE}.12.0",
+        f"{QNAP_STORAGE}.13.0",
+        f"{QNAP_STORAGE}.14.0",
+        # UPS
+        f"{QNAP_EXTERNAL}.1.0",
+        f"{QNAP_EXTERNAL}.6.0",
+        f"{QNAP_EXTERNAL}.7.0",
+    )
 
 
 def _qnap_index_oids() -> tuple[str, ...]:
