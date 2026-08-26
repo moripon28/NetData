@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Server = "http://192.168.10.201:39080"
+    [string]$Server = "http://localhost:39080"
 )
 
 $ErrorActionPreference = "Stop"

@@ -24,6 +24,13 @@ $u='http://192.168.10.201:39080'; $p=Join-Path $env:TEMP 'netpulse-install.ps1';
 
 WindowsはPython 3が必要です。`python` または `py` コマンドを自動検出します。確認コマンドは `Get-ScheduledTask -TaskName NetPulseAgent` です。
 
+## サーバー先の変更
+
+接続先サーバーの既定値は `http://localhost:39080` です。
+
+- Linux: `/etc/netpulse-agent.env` の `NETPULSE_SERVER` を書き換えた後、`sudo systemctl restart netpulse-agent` を実行します。
+- Windows: インストール時に `-Server http://<NetPulseのURL>` を指定します（スケジュールタスクへ保存されます）。
+
 ## アンインストール
 
 `EASY SETUP` の `UNINSTALL` タブから、対象OSのコマンドをコピーして管理者権限で実行します。

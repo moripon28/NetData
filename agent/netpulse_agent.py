@@ -154,7 +154,7 @@ def read_token(args: argparse.Namespace) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Signed NetPulse host metrics agent")
-    parser.add_argument("--server", default=os.getenv("NETPULSE_SERVER", "http://192.168.10.201:39080"))
+    parser.add_argument("--server", default=os.getenv("NETPULSE_SERVER", "http://localhost:39080"))
     parser.add_argument("--token", default="", help=argparse.SUPPRESS)
     parser.add_argument("--token-file", default=os.getenv("NETPULSE_TOKEN_FILE", ""))
     parser.add_argument("--interval", type=int, default=int(os.getenv("NETPULSE_INTERVAL", "15")))

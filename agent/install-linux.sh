@@ -11,7 +11,7 @@ if ! command -v systemctl >/dev/null 2>&1; then
   exit 1
 fi
 
-SERVER_URL="${1:-http://192.168.10.201:39080}"
+SERVER_URL="${1:-http://localhost:39080}"
 case "$SERVER_URL" in
   http://*|https://*) ;;
   *) echo "Server must be an http:// or https:// URL." >&2; exit 1 ;;
