@@ -736,6 +736,7 @@
   }
 
   function topologyStatusClass(status) {
+    if (window.NetPulseTopology3D?.statusClass) return window.NetPulseTopology3D.statusClass(status);
     const value = String(status || "unknown").toLowerCase();
     if (["error", "critical", "anomaly"].includes(value)) return "error";
     if (["warning", "degraded", "checking", "learning"].includes(value)) return "warning";
@@ -765,10 +766,30 @@
     return scale ? clamp(total / (scale * 100), 0, 1) : null;
   }
 
+  function topologyFleetTrafficReference() {
+    const rates = [];
+    const network = state.snapshot?.network || {};
+    const coreRate = Math.max(0, finiteNumber(network.rx_bps) || 0) + Math.max(0, finiteNumber(network.tx_bps) || 0);
+    if (coreRate > 0) rates.push(coreRate);
+    const snmpMetrics = state.snapshot?.snmp?.metrics || {};
+    const wanRate = Math.max(0, finiteNumber(snmpMetrics.wan_rx_bps) || 0) + Math.max(0, finiteNumber(snmpMetrics.wan_tx_bps) || 0);
+    if (wanRate > 0) rates.push(wanRate);
+    [...(state.snapshot?.agents?.items || []), ...(state.snapshot?.exporters?.nodes || [])].forEach((host) => {
+      const rate = Math.max(0, finiteNumber(host.rx_bps) || 0) + Math.max(0, finiteNumber(host.tx_bps) || 0);
+      if (rate > 0) rates.push(rate);
+    });
+    if (!rates.length) return 0;
+    rates.sort((first, second) => first - second);
+    if (rates.length < 4) return Math.max(1024, rates[rates.length - 1]);
+    const index = Math.min(rates.length - 1, Math.ceil(0.95 * rates.length) - 1);
+    return Math.max(1024, rates[index]);
+  }
+
   function topologyTrafficLevel(rxBps, txBps) {
     const rate = Math.max(0, finiteNumber(rxBps) || 0) + Math.max(0, finiteNumber(txBps) || 0);
     if (!rate) return 0;
-    return clamp((Math.log10(rate) - 3) / 5, 0.04, 1);
+    const reference = topologyFleetTrafficReference() || 1024;
+    return clamp(Math.log10(rate / reference) / 3, 0.04, 1);
   }
 
   function topologyTraffic(rxBps, txBps) {
@@ -929,8 +950,8 @@
       });
     };
     const orderedHosts = (items) => [...items].sort((first, second) => Number(inactiveTopologyStatuses.has(String(first.status || "unknown").toLowerCase())) - Number(inactiveTopologyStatuses.has(String(second.status || "unknown").toLowerCase())) || String(first.node_id || "").localeCompare(String(second.node_id || "")));
-    orderedHosts(snapshot.agents?.items || []).slice(0, 6).forEach((host, index) => appendHostNode(host, "agent", index));
-    orderedHosts(snapshot.exporters?.nodes || []).slice(0, 6).forEach((host, index) => appendHostNode(host, "exporter", index));
+    orderedHosts(snapshot.agents?.items || []).forEach((host, index) => appendHostNode(host, "agent", index));
+    orderedHosts(snapshot.exporters?.nodes || []).forEach((host, index) => appendHostNode(host, "exporter", index));
 
     const topologyDevices = [...state.devices]
       .filter((device) => !representedIps.has(device.ip))

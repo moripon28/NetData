@@ -70,11 +70,19 @@
   const WORLD_PULSE_GAIN = 1.9;
   const WORLD_EASE_MS = 1400;
 
+  function statusClass(status) {
+    const value = String(status || "unknown").toLowerCase();
+    if (ERROR_STATUSES.includes(value)) return "error";
+    if (WARNING_STATUSES.includes(value)) return "warning";
+    if (OFFLINE_STATUSES.includes(value)) return "offline";
+    return "online";
+  }
+
   function statusColor(node) {
-    const status = String(node.status || "unknown").toLowerCase();
-    if (["error", "critical", "anomaly"].includes(status)) return COLORS.danger;
-    if (["warning", "degraded", "checking", "learning"].includes(status)) return COLORS.orange;
-    if (["offline", "unreachable", "disabled", "unknown"].includes(status)) return COLORS.muted;
+    const klass = statusClass(node.status);
+    if (klass === "error") return COLORS.danger;
+    if (klass === "warning") return COLORS.orange;
+    if (klass === "offline") return COLORS.muted;
     if (node.role === "qnap") return COLORS.violet;
     if (["gateway", "exporter"].includes(node.role)) return COLORS.cyan;
     return COLORS.mint;
@@ -117,15 +125,15 @@
   }
 
   function orbitTargetSpeed(node) {
-    const status = String(node.status || "unknown").toLowerCase();
-    if (OFFLINE_STATUSES.includes(status)) return 0;
+    const klass = statusClass(node.status);
+    if (klass === "offline") return 0;
     const radius = Math.max(0.5, Number(node.orbitRadius) || 2);
     const kepler = ORBIT_KEPLER_K / Math.pow(radius, 1.5);
     const activity = clamp(Number(node.activityLevel) || 0.12, 0.05, 1);
     const individuality = 0.85 + idPhase(`${node.id}:orbit`) * 0.3;
     let statusBoost = 1;
-    if (ERROR_STATUSES.includes(status)) statusBoost = 1.6;
-    else if (WARNING_STATUSES.includes(status)) statusBoost = 1.35;
+    if (klass === "error") statusBoost = 1.6;
+    else if (klass === "warning") statusBoost = 1.35;
     return kepler * individuality * (0.4 + activity * 1.6) * statusBoost;
   }
 
@@ -269,6 +277,7 @@
     let frame = 0;
     let lastFrameAt = 0;
     let lastLabelAt = 0;
+    let lastLabelMeasureAt = 0;
     let lastStatsAt = 0;
     let renderedFrames = 0;
     let yawOffset = INITIAL_YAW;
@@ -283,10 +292,15 @@
     let cardLimit = 5;
     let cardVisibleIds = new Set();
     const labels = new Map();
+    const labelMeta = new Map();
     const phaseState = new Map();
     const ALWAYS_VISIBLE_ROLES = new Set(["qnap", "device-group"]);
     const SPHERE_ONLY_ROLES = new Set(["core"]);
     const gl = canvas.getContext("webgl", { alpha: true, antialias: true, premultipliedAlpha: false, powerPreference: "high-performance" });
+    const fontSizeObserver = new MutationObserver(() => {
+      labelMeta.forEach((meta) => { meta.width = 0; meta.height = 0; });
+    });
+    fontSizeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-font-size", "data-theme"] });
     const context2d = gl ? null : canvas.getContext("2d");
     const reticleEl = canvas.parentElement?.querySelector(".topology-reticle") || null;
     let reticleMetrics = { load: 0, pulse: 0 };
@@ -516,7 +530,7 @@
         let loadSum = 0;
         let onlineCount = 0;
         nodes.forEach((node) => {
-          if (OFFLINE_STATUSES.includes(String(node.status || "unknown").toLowerCase())) return;
+          if (statusClass(node.status) === "offline") return;
           activitySum += clamp(Number(node.activityLevel) || 0.12, 0.05, 1);
           loadSum += clamp(Number(node.loadLevel) || 0, 0, 1);
           onlineCount += 1;
@@ -542,7 +556,7 @@
         let loadSum = 0;
         let onlineCount = 0;
         nodes.forEach((node) => {
-          if (OFFLINE_STATUSES.includes(String(node.status || "unknown").toLowerCase())) return;
+          if (statusClass(node.status) === "offline") return;
           activitySum += clamp(Number(node.activityLevel) || 0.12, 0.05, 1);
           loadSum += clamp(Number(node.loadLevel) || 0, 0, 1);
           onlineCount += 1;
@@ -561,7 +575,7 @@
       const meshInstances = [];
       const ringColor = COLORS.cyan;
       const hubNode = nodes.find((node) => node.isHub) || null;
-      const hubOffline = !hubNode || ["offline", "unreachable", "disabled", "unknown"].includes(String(hubNode.status).toLowerCase());
+      const hubOffline = !hubNode || statusClass(hubNode.status) === "offline";
       const hubLoad = hubOffline ? 0 : clamp(Number(hubNode.loadLevel) || 0, 0, 1);
       const shellColor = hubLoad > 0 ? mixColor(COLORS.cyan, loadColor(hubLoad), 0.2 + hubLoad * 0.6) : COLORS.cyan;
       const gridColor = hubLoad > 0 ? mixColor(COLORS.mint, loadColor(hubLoad), 0.2 + hubLoad * 0.6) : COLORS.mint;
@@ -888,6 +902,10 @@
       const deltaMs = lastLabelAt ? Math.min(250, Math.max(0, now - lastLabelAt)) : 0;
       lastLabelAt = now;
       const smoothing = reducedMotion.matches ? 1 : 1 - Math.exp(-deltaMs / LABEL_EASE_MS);
+      if (now - lastLabelMeasureAt >= 1600) {
+        lastLabelMeasureAt = now;
+        labelMeta.forEach((meta) => { meta.width = 0; meta.height = 0; });
+      }
       const ordered = projectedNodes
         .filter(({ projected }) => projected.visible)
         .sort((first, second) => {
@@ -910,8 +928,14 @@
       const measured = ordered.map(({ node, projected }) => {
         const label = labels.get(node.id);
         if (!label || label.hidden) return null;
-        const width = label.offsetWidth;
-        const height = label.offsetHeight;
+        const meta = labelMeta.get(node.id);
+        let width = meta ? meta.width : 0;
+        let height = meta ? meta.height : 0;
+        if (!width || !height) {
+          width = label.offsetWidth;
+          height = label.offsetHeight;
+          if (meta) { meta.width = width; meta.height = height; }
+        }
         return width > 0 && height > 0 ? { node, projected, label, width, height } : null;
       }).filter(Boolean);
 
@@ -1011,34 +1035,69 @@
       if (notify) onSelect?.(node);
     }
 
+    const labelSignature = (node) => {
+      const status = statusClass(node.status);
+      const rate = node.trafficMeasured ? Math.max(0, Number(node.rxBps) || 0) + Math.max(0, Number(node.txBps) || 0) : 0;
+      const level = node.trafficMeasured ? clamp(Number(node.trafficLevel) || 0, 0, 1) : 0;
+      return JSON.stringify([
+        node.title,
+        status,
+        node.subtitle || node.role.toUpperCase(),
+        node.parked ? 1 : 0,
+        node.groupCount > 1 ? 1 : 0,
+        node.trafficMeasured ? 1 : 0,
+        node.linkType || "DISCOVERY",
+        node.socketCount == null ? "null" : node.socketCount,
+        node.trafficMeasured ? `${compactRateLabel(node.trafficRateLabel)}|${trafficBand(level, rate)}` : "",
+        node.metrics?.slice(0, 3)?.map((item) => `${item.label}|${item.value}`) || "",
+      ]);
+    };
+
     function buildLabels() {
       const activeIds = new Set(nodes.filter((node) => !SPHERE_ONLY_ROLES.has(node.role)).map((node) => node.id));
-      labels.forEach((label, id) => {
-        if (!activeIds.has(id)) { label.remove(); labels.delete(id); }
+      labelMeta.forEach((meta, id) => {
+        if (!activeIds.has(id)) {
+          meta.sizeObserver?.disconnect();
+          labels.get(id)?.remove();
+          labels.delete(id);
+          labelMeta.delete(id);
+        }
       });
       nodes.forEach((node) => {
         if (SPHERE_ONLY_ROLES.has(node.role)) return;
         let label = labels.get(node.id);
+        let meta = labelMeta.get(node.id);
         if (!label) {
           label = document.createElement("button");
           label.type = "button";
+          label.className = "topology-node-label";
           label.addEventListener("click", (event) => {
             event.stopPropagation();
             if (dragDistance >= 5) { event.preventDefault(); return; }
             select(label.dataset.nodeId);
           });
+          meta = { signature: null, width: 0, height: 0 };
+          labelMeta.set(node.id, meta);
           labels.set(node.id, label);
           labelLayer.append(label);
+          const sizeObserver = new MutationObserver(() => { meta.width = 0; meta.height = 0; });
+          sizeObserver.observe(label, { attributes: true, attributeFilter: ["class"] });
+          meta.sizeObserver = sizeObserver;
         }
         label.dataset.nodeId = node.id;
-        label.type = "button";
-        label.className = "topology-node-label";
-        if (node.id === selectedId) label.classList.add("selected");
-        if (node.parked) label.classList.add("is-parked");
-        if (node.groupCount > 1) label.classList.add("is-group");
-        if (["offline", "unreachable", "disabled", "unknown"].includes(String(node.status).toLowerCase())) label.classList.add("is-offline");
-        if (["warning", "degraded", "checking", "learning"].includes(String(node.status).toLowerCase())) label.classList.add("is-warning");
-        if (!cardVisibleIds.has(node.id)) label.classList.add("is-card-hidden");
+        const status = statusClass(node.status);
+        label.classList.toggle("selected", node.id === selectedId);
+        label.classList.toggle("is-parked", Boolean(node.parked));
+        label.classList.toggle("is-group", node.groupCount > 1);
+        label.classList.toggle("is-offline", status === "offline");
+        label.classList.toggle("is-warning", status === "warning");
+        label.classList.toggle("is-card-hidden", !cardVisibleIds.has(node.id));
+
+        const signature = labelSignature(node);
+        if (meta.signature === signature) return;
+        meta.signature = signature;
+        meta.width = 0;
+        meta.height = 0;
         label.setAttribute("aria-label", `${node.title} の情報を表示`);
         label.replaceChildren();
 
@@ -1120,6 +1179,7 @@
 
     function refreshColors() {
       loadThemeColors();
+      labelMeta.forEach((meta) => { meta.signature = null; });
       buildLabels();
       if (selectedId) select(selectedId);
     }
@@ -1193,12 +1253,41 @@
       cameraDistance = INITIAL_DISTANCE;
     }
 
+    const KEYBOARD_YAW_STEP = 0.11;
+    const KEYBOARD_PITCH_STEP = 0.08;
+    const KEYBOARD_ZOOM_STEP = 0.45;
+
+    function handleKeyboard(event) {
+      if (!event.isTrusted) return;
+      if (event.target !== canvas) return;
+      const active = document.activeElement;
+      if (active && (active.closest?.("dialog") || active.closest?.(".topology-node-label"))) return;
+      const isZoom = (event.key === "+" || event.key === "=") ? 1 : event.key === "-" || event.key === "_" ? -1 : 0;
+      if (event.key === "ArrowLeft") yawOffset -= KEYBOARD_YAW_STEP;
+      else if (event.key === "ArrowRight") yawOffset += KEYBOARD_YAW_STEP;
+      else if (event.key === "ArrowUp") pitchOffset = clamp(pitchOffset + KEYBOARD_PITCH_STEP, MIN_PITCH, MAX_PITCH);
+      else if (event.key === "ArrowDown") pitchOffset = clamp(pitchOffset - KEYBOARD_PITCH_STEP, MIN_PITCH, MAX_PITCH);
+      else if (isZoom > 0) cameraDistance = clamp(cameraDistance - KEYBOARD_ZOOM_STEP, MIN_DISTANCE, MAX_DISTANCE);
+      else if (isZoom < 0) cameraDistance = clamp(cameraDistance + KEYBOARD_ZOOM_STEP, MIN_DISTANCE, MAX_DISTANCE);
+      else if (event.key === "0" || event.key === "Home") resetCamera();
+      else return;
+      event.preventDefault();
+    }
+
+    function handleLabelFocus(event) {
+      const label = event.target?.closest?.(".topology-node-label");
+      if (!label) return;
+      select(label.dataset.nodeId);
+    }
+
     interactionSurface.addEventListener("pointerdown", beginPointerInteraction);
     window.addEventListener("pointermove", movePointerInteraction, { passive: false });
     window.addEventListener("pointerup", endPointerInteraction);
     window.addEventListener("pointercancel", cancelPointerInteraction);
     canvas.addEventListener("wheel", zoomCamera, { passive: false });
     canvas.addEventListener("dblclick", resetCamera);
+    canvas.addEventListener("keydown", handleKeyboard);
+    labelLayer.addEventListener("focusin", handleLabelFocus);
 
     refreshColors();
     frame = window.requestAnimationFrame(render);
@@ -1217,10 +1306,15 @@
         window.removeEventListener("pointercancel", cancelPointerInteraction);
         canvas.removeEventListener("wheel", zoomCamera);
         canvas.removeEventListener("dblclick", resetCamera);
+        canvas.removeEventListener("keydown", handleKeyboard);
+        labelLayer.removeEventListener("focusin", handleLabelFocus);
+        fontSizeObserver.disconnect();
+        labelMeta.forEach((meta) => meta.sizeObserver?.disconnect());
+        labelMeta.clear();
         labelLayer.replaceChildren();
       },
     };
   }
 
-  window.NetPulseTopology3D = { create };
+  window.NetPulseTopology3D = { create, statusClass };
 })();

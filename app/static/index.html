@@ -21,7 +21,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=20260824-reticle-live">
+  <link rel="stylesheet" href="/static/styles.css?v=20260829-lgd">
 </head>
 <body>
   <div class="boot" aria-hidden="true">
@@ -80,7 +80,7 @@
         </header>
         <div class="topology-stage" id="topologyStage">
           <div class="topology-volume" aria-hidden="true"><i></i><i></i><i></i></div>
-          <canvas id="topologyCanvas" aria-label="3Dネットワーク端末接続図"></canvas>
+          <canvas id="topologyCanvas" tabindex="0" role="application" aria-label="3Dネットワーク端末接続図。矢印キーで回転、+/-でズーム、0でリセット、Tabでノード選択"></canvas>
           <div class="topology-reticle" aria-hidden="true"><i class="reticle-sweep"></i><i class="reticle-mark reticle-mark--n"></i><i class="reticle-mark reticle-mark--e"></i><i class="reticle-mark reticle-mark--s"></i><i class="reticle-mark reticle-mark--w"></i></div>
           <div class="topology-label-layer" id="topologyLabelLayer" aria-label="ネットワークノード"></div>
           <div class="topology-scene-meta">
@@ -98,6 +98,7 @@
             <span><b>DRAG</b><small>ORBIT CAMERA</small></span>
             <span><b>SCROLL</b><small>DEPTH ZOOM</small></span>
             <span><b>DOUBLE CLICK</b><small>RESET VIEW</small></span>
+            <span><b>ARROWS / + - / 0</b><small>KEYBOARD ORBIT · ZOOM · RESET</small></span>
           </div>
           <div class="topology-depth-rail" aria-hidden="true"><span>NEAR</span><i></i><i></i><i></i><i></i><i></i><span>FAR</span></div>
           <aside class="llm-flavor-stream" id="llmFlavorStream" aria-hidden="true">
@@ -116,7 +117,7 @@
             <p id="topologyNodeDescription">ノードを選択すると、取得できる主要メトリクスを表示します。</p>
             <button id="topologyProfileButton" type="button" hidden>OPEN DEVICE PROFILE</button>
           </aside>
-          <div class="topology-legend"><span><i class="dot-online"></i>ONLINE</span><span><i class="dot-warning"></i>DEGRADED</span><span><i class="dot-offline"></i>OFFLINE</span><span><i class="dot-flow"></i>TRAFFIC LOW → SURGE</span></div>
+          <div class="topology-legend"><span><i class="dot-online"></i>ONLINE</span><span><i class="dot-warning"></i>DEGRADED</span><span><i class="dot-error"></i>ERROR</span><span><i class="dot-offline"></i>OFFLINE</span><span><i class="dot-flow"></i>TRAFFIC LOW → SURGE</span></div>
         </div>
       </article>
 
@@ -426,8 +427,8 @@
     </div>
   </dialog>
 
-  <script src="/static/topology3d.js?v=20260824-reticle-live" defer></script>
-  <script src="/static/app.js?v=20260823-themes" defer></script>
+  <script src="/static/topology3d.js?v=20260829-lgd" defer></script>
+  <script src="/static/app.js?v=20260829-lgd" defer></script>
   <script src="/static/boot.js?v=20260823-boot" defer></script>
 </body>
 </html>
