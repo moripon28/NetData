@@ -57,6 +57,7 @@
   const LABEL_RESERVED_SELECTORS = [
     ".topology-scene-meta",
     ".topology-legend",
+    ".topology-node-label.is-parked",
   ];
   const OFFLINE_STATUSES = ["offline", "unreachable", "disabled", "unknown"];
   const WARNING_STATUSES = ["warning", "degraded", "checking", "learning"];
@@ -166,6 +167,7 @@
     groups.telemetry.sort(byId);
     groups.devices.sort(byId);
 
+    nodes.forEach((node) => { node.parked = node.role === "device-group"; });
     groups.core.forEach((node) => { node.position = [0, 0, 0]; node.orbit = 0; node.isHub = true; });
     const place = (items, radius, phase) => {
       items.forEach((node, index) => {
@@ -602,7 +604,7 @@
         }
       });
 
-      projectedNodes = nodes.map((node) => ({ node, projected: project(node.position, view, size) }));
+      projectedNodes = nodes.filter((node) => !node.parked).map((node) => ({ node, projected: project(node.position, view, size) }));
       const projectedById = new Map(projectedNodes.map((item) => [item.node.id, item]));
       const coreProjection = project([0, 0, 0], view, size);
 
@@ -1032,6 +1034,7 @@
         label.type = "button";
         label.className = "topology-node-label";
         if (node.id === selectedId) label.classList.add("selected");
+        if (node.parked) label.classList.add("is-parked");
         if (node.groupCount > 1) label.classList.add("is-group");
         if (["offline", "unreachable", "disabled", "unknown"].includes(String(node.status).toLowerCase())) label.classList.add("is-offline");
         if (["warning", "degraded", "checking", "learning"].includes(String(node.status).toLowerCase())) label.classList.add("is-warning");

@@ -484,6 +484,8 @@ dialog textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px 
 .topology-readouts small { overflow: hidden; text-overflow: ellipsis; color: var(--muted-dim); font: 5px var(--mono); letter-spacing: .08em; white-space: nowrap; }
 .topology-readouts b { overflow: hidden; text-overflow: ellipsis; color: color-mix(in srgb, var(--cyan) 70%, var(--text) 30%); font: 7px var(--mono); white-space: nowrap; }
 .topology-camera-hud { position: absolute; z-index: 7; right: 18px; bottom: 64px; width: 242px; display: grid; grid-template-columns: 1fr 1fr; gap: 1px; pointer-events: none; background: color-mix(in srgb, var(--cyan) 7.5%, transparent); border-right: 1px solid color-mix(in srgb, var(--cyan) 16%, transparent); opacity: .68; }
+.topology-node-label.is-parked { right: 18px; bottom: 178px; left: auto; top: auto; max-width: 250px; cursor: pointer; }
+.topology-node-label.is-parked::before { display: none; }
 .topology-camera-hud span { display: grid; gap: 3px; padding: 8px 9px; background: var(--card-2); }
 .topology-camera-hud b { color: color-mix(in srgb, var(--mint) 76%, transparent); font: 6px var(--mono); letter-spacing: .1em; }
 .topology-camera-hud small { color: var(--muted-dim); font: 5px var(--mono); letter-spacing: .08em; }
@@ -509,6 +511,7 @@ dialog textarea { width: 100%; min-height: 120px; resize: vertical; border: 1px 
   .topology-readouts span { padding: 5px 4px; }
   .topology-readouts small { display: none; }
   .topology-camera-hud, .topology-depth-rail { display: none; }
+  .topology-node-label.is-parked { display: none; }
   .topology-node-label { min-width: 96px; max-width: 152px; }
   .node-label-glance { font-size: 5px; }
   .node-flow-readout { font-size: 4px; }
