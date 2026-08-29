@@ -268,10 +268,34 @@
     return { positions, normals, indices };
   }
 
-  function create({ canvas, labelLayer, onSelect, onModeChange, onFrameStats }) {
+  const QUALITY_PRESETS = {
+    low: { resolution: 0.75, fps: 15, particles: 0.5 },
+    standard: { resolution: 1, fps: 30, particles: 1 },
+    high: { resolution: 1.4, fps: 30, particles: 1.6 },
+    ultra: { resolution: 2, fps: 60, particles: 2.4 },
+  };
+
+  function normalizedQuality(options) {
+    const preset = QUALITY_PRESETS[options?.preset] ? options.preset : "standard";
+    const base = QUALITY_PRESETS[preset];
+    const clampFinite = (value, minimum, maximum, fallback) => {
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return fallback;
+      return clamp(Math.round((parsed * 10) / 5) * 5, minimum, maximum);
+    };
+    return {
+      preset,
+      resolution: Number.isFinite(Number(options?.resolution)) ? clamp(Number(options.resolution), 0.5, 2.5) : base.resolution,
+      fps: clampFinite(options?.fps, 10, 60, base.fps),
+      particles: Number.isFinite(Number(options?.particles)) ? clamp(Number(options.particles), 0.3, 3) : base.particles,
+    };
+  }
+
+  function create({ canvas, labelLayer, onSelect, onModeChange, onFrameStats, quality }) {
     if (!canvas || !labelLayer) return null;
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    let qualitySettings = normalizedQuality(quality);
     let nodes = [];
     let selectedId = null;
     let frame = 0;
@@ -314,7 +338,8 @@
     let pointBuffer = null;
     const meshBuffers = {};
 
-    if (gl) {
+    function setupWebglRenderer() {
+      if (!gl) return false;
       const lineVertex = `
         attribute vec2 a_position;
         attribute vec4 a_color;
@@ -418,17 +443,22 @@
         gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
         gl.enable(gl.DEPTH_TEST);
         gl.depthFunc(gl.LEQUAL);
+        return Boolean(lineProgram && pointProgram && meshProgram);
       } catch (error) {
         console.warn("WebGL topology initialization failed", error);
+        lineProgram = null;
+        pointProgram = null;
+        meshProgram = null;
+        return false;
       }
     }
 
-    const webglReady = Boolean(gl && lineProgram && pointProgram && meshProgram);
+    const webglReady = setupWebglRenderer();
     onModeChange?.(webglReady ? "webgl" : "fallback");
 
     function dimensions() {
       const rect = canvas.getBoundingClientRect();
-      const dpr = Math.min(1.5, window.devicePixelRatio || 1);
+      const dpr = Math.min((window.devicePixelRatio || 1) * qualitySettings.resolution, 5);
       const pixelWidth = Math.max(1, Math.floor(rect.width * dpr));
       const pixelHeight = Math.max(1, Math.floor(rect.height * dpr));
       if (canvas.width !== pixelWidth || canvas.height !== pixelHeight) {
@@ -649,7 +679,7 @@
           const addParticles = (rate, from, to, directionOffset) => {
             if (!(rate > 0) || !(total > 0)) return;
             const share = rate / total;
-            const particleCount = 1 + Math.round(level * 3 * share);
+            const particleCount = Math.max(1, Math.round((1 + Math.round(level * 3 * share)) * qualitySettings.particles));
             for (let particleIndex = 0; particleIndex < particleCount; particleIndex += 1) {
               const progress = reducedMotion.matches
                 ? (particleIndex + 1) / (particleCount + 1)
@@ -986,7 +1016,7 @@
     }
 
     function render(now) {
-      const fps = reducedMotion.matches ? 12 : 30;
+      const fps = reducedMotion.matches ? Math.min(12, qualitySettings.fps) : qualitySettings.fps;
       if (!document.hidden && now - lastFrameAt >= 1000 / fps) {
         const size = dimensions();
         const scene = buildScene(now, size);
@@ -1023,6 +1053,10 @@
       cardLimit = Math.min(32, Math.max(1, Math.round(Number(limit) || cardLimit)));
       cardVisibleIds = computeCardVisibleIds();
       syncCardVisibility();
+    }
+
+    function setQuality(options = {}) {
+      qualitySettings = normalizedQuality(options);
     }
 
     function select(id, notify = true) {
@@ -1295,6 +1329,7 @@
       setNodes,
       select,
       setCardConfig,
+      setQuality,
       resetCamera,
       refreshColors,
       get mode() { return webglReady ? "webgl" : "fallback"; },
@@ -1316,5 +1351,5 @@
     };
   }
 
-  window.NetPulseTopology3D = { create, statusClass };
+  window.NetPulseTopology3D = { create, statusClass, qualityPresets: QUALITY_PRESETS };
 })();

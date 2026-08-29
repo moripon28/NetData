@@ -28,6 +28,11 @@
     topologyCardSettingsForm: $("topologyCardSettingsForm"), topologyCardSettingsClose: $("topologyCardSettingsClose"),
     topologyCardSettingsCancel: $("topologyCardSettingsCancel"), topologyCardMode: $("topologyCardMode"),
     topologyCardLimit: $("topologyCardLimit"), topologyCardSettingsStatus: $("topologyCardSettingsStatus"),
+    topologyQualitySettingsButton: $("topologyQualitySettingsButton"), topologyQualitySettingsDialog: $("topologyQualitySettingsDialog"),
+    topologyQualitySettingsForm: $("topologyQualitySettingsForm"), topologyQualitySettingsClose: $("topologyQualitySettingsClose"),
+    topologyQualitySettingsCancel: $("topologyQualitySettingsCancel"), topologyQualityPreset: $("topologyQualityPreset"),
+    topologyQualityFps: $("topologyQualityFps"),
+    topologyQualityParticles: $("topologyQualityParticles"), topologyQualitySettingsStatus: $("topologyQualitySettingsStatus"),
     llmFlavorStream: $("llmFlavorStream"), llmFlavorScope: $("llmFlavorScope"),
     llmFlavorViewport: $("llmFlavorViewport"), llmFlavorContent: $("llmFlavorContent"),
     llmFlavorCursor: $("llmFlavorCursor"), llmFlavorStatus: $("llmFlavorStatus"),
@@ -77,11 +82,19 @@
 
   const topologyCardsKey = "netpulse.topologyCards";
   const topologyCardLimits = 10;
+  const topologyQualityKey = "netpulse.topologyQuality";
+  const topologyQualityPresets = Object.fromEntries(Object.entries(window.NetPulseTopology3D?.qualityPresets || {
+    low: { resolution: 0.75, fps: 15, particles: 0.5 },
+    standard: { resolution: 1, fps: 30, particles: 1 },
+    high: { resolution: 1.4, fps: 30, particles: 1.6 },
+    ultra: { resolution: 2, fps: 60, particles: 2.4 },
+  }).map(([preset, values]) => [preset, { ...values }]));
   const state = {
     snapshot: null, devices: [], rx: [], tx: [], filter: "all", search: "", selectedIp: null,
     trafficSelection: "all", trafficSources: [], trafficSeries: {}, trafficTabSignature: "", trafficWindowMinutes: 5,
     topologyNodes: [], topologyScene: null, selectedTopologyNode: null,
     topologyCardSettings: loadTopologyCardSettings(),
+    topologyQualitySettings: loadTopologyQualitySettings(),
     socket: null, reconnectTimer: null, reports: [], llmSettings: null, agents: [], selectedAgent: null,
     flavorSignature: "", flavorGeneration: 0,
   };
@@ -98,6 +111,18 @@
       const limit = Math.min(topologyCardLimits, Math.max(1, Math.round(Number(parsed && parsed.limit) || 5)));
       return { mode, limit };
     } catch (_) { return { mode: "top", limit: 5 }; }
+  }
+  function loadTopologyQualitySettings() {
+    const fallback = { preset: "standard", fps: 30, particles: 1 };
+    try {
+      const parsed = JSON.parse(window.localStorage.getItem(topologyQualityKey) || "null");
+      if (!parsed || !topologyQualityPresets[parsed.preset]) return fallback;
+      return {
+        preset: parsed.preset,
+        fps: Math.min(60, Math.max(10, Math.round(Number(parsed.fps) || fallback.fps))),
+        particles: Math.min(3, Math.max(0.3, Number(parsed.particles) || fallback.particles)),
+      };
+    } catch (_) { return fallback; }
   }
   const inactiveTopologyStatuses = new Set(["offline", "unreachable", "unknown", "disabled"]);
   const typeIcons = { router: "⌁", computer: "▣", phone: "▯", tablet: "▭", tv: "▰", iot: "◇", server: "▤", printer: "▥", camera: "◉", game: "✦", unknown: "?" };
@@ -854,6 +879,26 @@
     elements.topologyCardSettingsDialog.close();
   }
 
+  function applyTopologyQualitySettings() {
+    const settings = state.topologyQualitySettings;
+    state.topologyScene?.setQuality(settings);
+    const presetLabel = { low: "LOW", standard: "STANDARD", high: "HIGH", ultra: "ULTRA" }[settings.preset] || "STANDARD";
+    elements.topologyQualitySettingsButton.textContent = `QUALITY: ${presetLabel} ${settings.fps}FPS`;
+  }
+
+  function openTopologyQualitySettings() {
+    const { preset, fps, particles } = state.topologyQualitySettings;
+    elements.topologyQualityPreset.value = preset;
+    elements.topologyQualityFps.value = String(fps);
+    elements.topologyQualityParticles.value = String(Math.round(particles * 10) / 10);
+    elements.topologyQualitySettingsStatus.textContent = "";
+    elements.topologyQualitySettingsDialog.showModal();
+  }
+
+  function closeTopologyQualitySettings() {
+    elements.topologyQualitySettingsDialog.close();
+  }
+
   function updateTopologyNodes() {
     const snapshot = state.snapshot || {};
     const system = snapshot.system || {};
@@ -1253,9 +1298,33 @@
     };
     state.topologyCardSettings = settings;
     try { localStorage.setItem(topologyCardsKey, JSON.stringify(settings)); } catch (_) { /* Storage can be disabled. */ }
-    applyTopologyCardSettings();
+  applyTopologyCardSettings();
+  applyTopologyQualitySettings();
+
     elements.topologyCardSettingsStatus.textContent = "設定を保存しました。星図に即適用されました。";
     window.setTimeout(closeTopologyCardSettings, 650);
+  });
+  elements.topologyQualitySettingsButton.addEventListener("click", openTopologyQualitySettings);
+  elements.topologyQualityPreset.addEventListener("change", () => {
+    const preset = topologyQualityPresets[elements.topologyQualityPreset.value] ? elements.topologyQualityPreset.value : "standard";
+    elements.topologyQualityFps.value = String(topologyQualityPresets[preset].fps);
+    elements.topologyQualityParticles.value = String(Math.round(topologyQualityPresets[preset].particles * 10) / 10);
+  });
+  elements.topologyQualitySettingsClose.addEventListener("click", closeTopologyQualitySettings);
+  elements.topologyQualitySettingsCancel.addEventListener("click", closeTopologyQualitySettings);
+  elements.topologyQualitySettingsForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const preset = topologyQualityPresets[elements.topologyQualityPreset.value] ? elements.topologyQualityPreset.value : "standard";
+    const settings = {
+      preset,
+      fps: Math.min(60, Math.max(10, Number(elements.topologyQualityFps.value) || topologyQualityPresets[preset].fps)),
+      particles: Math.min(3, Math.max(0.3, Number(elements.topologyQualityParticles.value) || topologyQualityPresets[preset].particles)),
+    };
+    state.topologyQualitySettings = settings;
+    try { localStorage.setItem(topologyQualityKey, JSON.stringify(settings)); } catch (_) { /* Storage can be disabled. */ }
+    applyTopologyQualitySettings();
+    elements.topologyQualitySettingsStatus.textContent = "設定を保存しました。星図に即適用されました。";
+    window.setTimeout(closeTopologyQualitySettings, 650);
   });
   elements.agentSetupButton.addEventListener("click", openAgentSetup);
   document.querySelectorAll("[data-agent-setup-mode]").forEach((button) => button.addEventListener("click", () => setAgentSetupMode(button.dataset.agentSetupMode)));
@@ -1345,6 +1414,7 @@
   state.topologyScene = window.NetPulseTopology3D?.create({
     canvas: elements.topology,
     labelLayer: elements.topologyLabelLayer,
+    quality: state.topologyQualitySettings,
     onSelect: renderTopologyInspector,
     onModeChange: (mode) => {
       const fallback = mode !== "webgl";

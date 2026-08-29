@@ -21,7 +21,7 @@
       }
     })();
   </script>
-  <link rel="stylesheet" href="/static/styles.css?v=20260829-lgd">
+  <link rel="stylesheet" href="/static/styles.css?v=20260830-qual">
 </head>
 <body>
   <div class="boot" aria-hidden="true">
@@ -76,7 +76,7 @@
       <article class="panel topology-panel">
         <header class="panel-head">
           <div><span class="panel-index">01</span><h2>NETWORK CONSTELLATION</h2><span class="panel-kicker">RAW WEBGL · SPATIAL TELEMETRY</span></div>
-          <div class="topology-head-status"><button class="topology-head-action" id="topologyCardSettingsButton" type="button" title="ノードカードの表示設定">CARDS: TOP 5</button><span class="render-mode" id="topologyRenderMode">WEBGL · STARTING</span><span class="subnet-label" id="subnetLabel">SUBNET · DETECTING</span></div>
+          <div class="topology-head-status"><button class="topology-head-action" id="topologyCardSettingsButton" type="button" title="ノードカードの表示設定">CARDS: TOP 5</button><button class="topology-head-action" id="topologyQualitySettingsButton" type="button" title="描画画質の設定">QUALITY: STANDARD 30FPS</button><span class="render-mode" id="topologyRenderMode">WEBGL · STARTING</span><span class="subnet-label" id="subnetLabel">SUBNET · DETECTING</span></div>
         </header>
         <div class="topology-stage" id="topologyStage">
           <div class="topology-volume" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -362,6 +362,21 @@
     </form>
   </dialog>
 
+  <dialog id="topologyQualitySettingsDialog" class="settings-dialog">
+    <form id="topologyQualitySettingsForm">
+      <div class="dialog-head"><div><small>CONSTELLATION DISPLAY</small><h2>描画画質の設定</h2></div><button id="topologyQualitySettingsClose" type="button" aria-label="閉じる">×</button></div>
+      <p class="form-hint">星図（NETWORK CONSTELLATION）の描画画質を設定できます。プリセットを変更すると解像度・フレームレート・パーティクル密度がまとめて変わります。個別項目はプリセットの値を手動で上書きできます。解像度が高いほど滑らかですがRaspberry Pi 5への負荷も増します。アニメーションオフ（OS設定）のときはフレームレートは最大12FPSに制限されます。</p>
+      <div class="form-grid">
+        <label>プリセット<select id="topologyQualityPreset"><option value="low">低（省リソース）</option><option value="standard">標準</option><option value="high">高</option><option value="ultra">最高（Ultra）</option></select></label>
+        <label>フレームレート (FPS)<input id="topologyQualityFps" type="number" min="10" max="60" step="1" value="30"></label>
+        <label>パーティクル密度<input id="topologyQualityParticles" type="number" min="0.3" max="3" step="0.1" value="1"></label>
+      </div>
+      <p class="form-hint">解像度倍率はプリセット（低 0.75 / 標準 1 / 高 1.4 / 最高 2）から自動的に設定されます。FPSは実際の描画速度の上限です（実測値は星図下の「— FPS」HUDで確認できます）。パーティクル密度はトラフィックの光粒子の量です。</p>
+      <p class="form-status" id="topologyQualitySettingsStatus" role="status"></p>
+      <div class="dialog-actions"><button id="topologyQualitySettingsCancel" type="button" class="cancel">CANCEL</button><button type="submit" class="save">SAVE SETTINGS</button></div>
+    </form>
+  </dialog>
+
   <dialog id="llmSettingsDialog" class="settings-dialog">
     <form id="llmSettingsForm">
       <div class="dialog-head"><div><small>LOCAL AI SETTINGS</small><h2>ネットワーク報告</h2></div><button id="llmSettingsClose" type="button" aria-label="閉じる">×</button></div>
@@ -427,8 +442,8 @@
     </div>
   </dialog>
 
-  <script src="/static/topology3d.js?v=20260829-lgd" defer></script>
-  <script src="/static/app.js?v=20260829-lgd" defer></script>
+  <script src="/static/topology3d.js?v=20260830-qual" defer></script>
+  <script src="/static/app.js?v=20260830-qual" defer></script>
   <script src="/static/boot.js?v=20260823-boot" defer></script>
 </body>
 </html>

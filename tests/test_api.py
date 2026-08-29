@@ -32,8 +32,8 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "EASY SETUP" in index.text
         assert "RAW WEBGL" in index.text
         assert "SPATIAL TELEMETRY" in index.text
-        assert 'src="/static/topology3d.js?v=20260829-lgd"' in index.text
-        assert 'src="/static/app.js?v=20260829-lgd"' in index.text
+        assert 'src="/static/topology3d.js?v=20260830-qual"' in index.text
+        assert 'src="/static/app.js?v=20260830-qual"' in index.text
         assert 'data-font-size="small"' in index.text
         assert 'data-font-size="medium"' in index.text
         assert 'data-font-size="large"' in index.text
@@ -50,10 +50,13 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert 'id="topologyCardSettingsDialog"' in index.text
         assert 'id="topologyCardMode"' in index.text
         assert 'id="topologyCardLimit"' in index.text
+        assert 'id="topologyQualitySettingsButton"' in index.text
+        assert 'id="topologyQualitySettingsDialog"' in index.text
+        assert 'id="topologyQualityPreset"' in index.text
+        assert 'id="topologyQualityFps"' in index.text
         assert "MANAGE" in index.text
         assert "接続端末、通信量、遅延、Raspberry Piの状態をリアルタイムに観測します。" not in index.text
-        assert '/static/styles.css?v=20260829-lgd' in index.text
-        assert '/static/app.js?v=20260829-lgd' in index.text
+        assert '/static/styles.css?v=20260830-qual' in index.text
         assert "TRAFFIC LOW → SURGE" in index.text
         assert '<i class="dot-error"></i>ERROR' in index.text
         assert '<div class="health-value"><strong id="healthScore">--</strong></div>' in index.text
@@ -86,6 +89,9 @@ def test_health_snapshot_and_static_ui(tmp_path):
         assert "compactRateLabel" in topology_script.text
         assert "setCardConfig" in topology_script.text
         assert "computeCardVisibleIds" in topology_script.text
+        assert "setQuality" in topology_script.text
+        assert "QUALITY_PRESETS" in topology_script.text
+        assert "qualitySettings" in topology_script.text
         assert '"is-card-hidden"' in topology_script.text
 
         app_script = client.get("/static/app.js")
