@@ -62,6 +62,9 @@
   const OFFLINE_STATUSES = ["offline", "unreachable", "disabled", "unknown"];
   const WARNING_STATUSES = ["warning", "degraded", "checking", "learning"];
   const ERROR_STATUSES = ["error", "critical", "anomaly"];
+  const PRESENCE_EASE_OFF_MS = 190;
+  const PRESENCE_EASE_ON_MS = 260;
+  const OFFLINE_RIPPLE_MS = 820;
   const ORBIT_Z_SQUASH = 0.68;
   const ORBIT_KEPLER_K = 0.00026;
   const ORBIT_EASE_MS = 900;
@@ -547,6 +550,10 @@
           ripple: idPhase(`${node.id}:ripple`) * TAU,
           orbitAngle: node.initialAngle != null ? node.initialAngle : (node.orbit || 0),
           orbitSpeed: 0,
+          presence: OFFLINE_STATUSES.includes(String(node.status || "unknown").toLowerCase()) ? 0 : 1,
+          rippleStart: 0,
+          lastColor: null,
+          wasOffline: OFFLINE_STATUSES.includes(String(node.status || "unknown").toLowerCase()),
         };
         phaseState.set(node.id, phase);
       }
@@ -658,14 +665,50 @@
         const { load, speed: beatSpeed, amplitude: beatAmplitude } = loadBeat(offline ? null : node);
         const baseColor = statusColor(node);
         const color = offline || !(load > 0) ? baseColor : mixColor(baseColor, loadColor(load), 0.22 + load * 0.74);
-        if (!node.isHub) appendLine(lines, coreProjection, projected, color, offline ? 0.055 : 0.12);
 
         const nodePhase = phaseFor(node);
         if (!reducedMotion.matches) {
           nodePhase.beat = (nodePhase.beat + beatSpeed * frameDeltaMs) % TAU;
           nodePhase.ripple = (nodePhase.ripple + beatSpeed * frameDeltaMs) % TAU;
           nodePhase.spin = (nodePhase.spin + 0.00036 * (0.7 + idPhase(`${node.id}:spin`) * 0.45) * frameDeltaMs) % TAU;
+          if (offline && !nodePhase.wasOffline) nodePhase.rippleStart = now;
+          nodePhase.wasOffline = offline;
+          const presenceTarget = offline ? 0 : 1;
+          if (Math.abs(nodePhase.presence - presenceTarget) > 0.001) {
+            const easeMs = offline ? PRESENCE_EASE_OFF_MS : PRESENCE_EASE_ON_MS;
+            nodePhase.presence += (presenceTarget - nodePhase.presence) * (1 - Math.exp(-frameDeltaMs / easeMs));
+            if (Math.abs(nodePhase.presence - presenceTarget) <= 0.001) nodePhase.presence = presenceTarget;
+          }
         }
+        const presence = reducedMotion.matches ? (offline ? 0 : 1) : clamp(nodePhase.presence, 0, 1);
+        const fade = Math.pow(1 - presence, 1.35);
+        if (presence > 0.98) nodePhase.lastColor = color.slice();
+        if (!nodePhase.lastColor) nodePhase.lastColor = color.slice();
+        const dotColor = fade > 0.001 ? mixColor(nodePhase.lastColor, statusColor(node), fade) : color;
+        const dotScale = 1 - fade * 0.4;
+        const coreAlpha = 0.92 - fade * 0.62;
+        const haloAlpha = 0.13 - fade * 0.095;
+        const baseSize = node.role === "gateway" ? 25 : node.role === "device" ? 13 : 18;
+        if (!node.isHub) appendLine(lines, coreProjection, projected, dotColor, 0.055 + 0.065 * presence);
+
+        if (!reducedMotion.matches && nodePhase.rippleStart) {
+          const rippleAge = now - nodePhase.rippleStart;
+          if (rippleAge >= OFFLINE_RIPPLE_MS) {
+            nodePhase.rippleStart = 0;
+          } else {
+            const rippleProgress = rippleAge / OFFLINE_RIPPLE_MS;
+            const rippleAlpha = Math.sin(rippleProgress * Math.PI) * 0.5;
+            const rippleRadius = baseSize * projected.scale * (1.1 + rippleProgress * 2.3);
+            appendScreenRing(lines, projected, rippleRadius, dotColor, rippleAlpha, size);
+            appendScreenRing(lines, projected, rippleRadius * 0.62, dotColor, rippleAlpha * 0.55, size);
+          }
+        }
+
+        if (!SPHERE_ONLY_ROLES.has(node.role) || !webglReady) {
+          points.push(projected.x, projected.y, baseSize * 1.85 * dotScale * projected.scale, dotColor[0], dotColor[1], dotColor[2], haloAlpha);
+          points.push(projected.x, projected.y, baseSize * dotScale * projected.scale, dotColor[0], dotColor[1], dotColor[2], coreAlpha);
+        }
+        if (node.id === selectedId) appendScreenRing(lines, projected, baseSize * 0.72 * dotScale * projected.scale, dotColor, 0.78 * (0.3 + 0.7 * presence), size);
 
         const trafficTarget = node.trafficTargetId ? projectedById.get(node.trafficTargetId) : null;
         if (trafficTarget && node.trafficMeasured && !offline) {
@@ -693,25 +736,18 @@
           addParticles(rx, trafficTarget.node, node, 0.47);
         }
 
-        const baseSize = node.role === "gateway" ? 25 : node.role === "device" ? 13 : 18;
-        if (!SPHERE_ONLY_ROLES.has(node.role) || !webglReady) {
-          points.push(projected.x, projected.y, baseSize * 1.85 * projected.scale, color[0], color[1], color[2], 0.13);
-          points.push(projected.x, projected.y, baseSize * projected.scale, color[0], color[1], color[2], 0.92);
-        }
-        if (node.id === selectedId) appendScreenRing(lines, projected, baseSize * 0.72 * projected.scale, color, 0.78, size);
-
         const selected = node.id === selectedId;
         const pulse = 1 + (reducedMotion.matches ? 0 : Math.sin(nodePhase.beat) * beatAmplitude);
         const baseScale = node.role === "gateway" ? 0.45 : node.role === "qnap" ? 0.39 : ["agent", "core", "exporter"].includes(node.role) ? 0.31 : node.role === "device-group" ? 0.4 : 0.24;
-        const scale = baseScale * pulse * (selected ? 1.25 : 1);
+        const scale = baseScale * pulse * (selected ? 1.25 : 1) * (1 - 0.2 * fade);
         meshInstances.push({
           mesh: ["core", "gateway", "device-group"].includes(node.role) ? "sphere" : "octahedron",
           center: node.position,
           scale: node.role === "gateway" ? [scale * 1.45, scale * 0.32, scale * 1.45] : node.role === "qnap" ? [scale * 1.15, scale * 0.75, scale] : [scale, scale, scale],
           spin: nodePhase.spin,
-          color,
-          alpha: offline ? 0.2 : selected ? 0.96 : 0.72,
-          emissive: selected ? 0.94 : clamp(0.32 + activity * 0.26 + load * 0.42, 0, 1),
+          color: dotColor,
+          alpha: (offline ? 0.2 : selected ? 0.96 : 0.72) * (0.2 + 0.8 * presence),
+          emissive: selected ? 0.94 : clamp(0.32 + activity * 0.26 + load * 0.42, 0, 1) * (0.4 + 0.6 * presence),
         });
       });
 
