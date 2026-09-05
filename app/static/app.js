@@ -805,8 +805,8 @@
     });
     if (!rates.length) return 0;
     rates.sort((first, second) => first - second);
-    if (rates.length < 4) return Math.max(1024, rates[rates.length - 1]);
-    const index = Math.min(rates.length - 1, Math.ceil(0.95 * rates.length) - 1);
+    if (rates.length < 4) return Math.max(1024, rates[0]);
+    const index = Math.min(rates.length - 1, Math.floor(0.5 * rates.length));
     return Math.max(1024, rates[index]);
   }
 
@@ -814,7 +814,11 @@
     const rate = Math.max(0, finiteNumber(rxBps) || 0) + Math.max(0, finiteNumber(txBps) || 0);
     if (!rate) return 0;
     const reference = topologyFleetTrafficReference() || 1024;
-    return clamp(Math.log10(rate / reference) / 3, 0.04, 1);
+    const band = (low, high, exponent) => clamp(Math.log10(rate / low) / Math.log10(high / low) / (exponent || 1), 0, 1);
+    if (rate < reference) {
+      return 0.04 + band(1024, reference, 2) * 0.31;
+    }
+    return 0.35 + band(reference, 5 * reference, 2) * 0.33;
   }
 
   function topologyTraffic(rxBps, txBps) {
