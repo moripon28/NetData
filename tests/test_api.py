@@ -359,6 +359,54 @@ def test_traffic_sources_are_stable_and_do_not_double_count_same_ip(tmp_path):
         assert traffic["total"]["rx_bps"] == 30
 
 
+def test_agent_rows_for_same_source_ip_are_deduped_to_most_recent(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path,
+        collector_enabled=False,
+        discovery_enabled=False,
+        agent_token="test-token-that-is-long-enough-01",
+        agent_offline_after=3600,
+    )
+    app = create_app(settings)
+    base = {
+        "os_name": "Linux", "cpu_percent": 10, "memory_percent": 20, "disk_percent": 30,
+        "uptime_seconds": 100, "tx_bps": 1,
+    }
+    with TestClient(app) as client:
+        # Two distinct node_ids from the same source_ip, simulating a host whose
+        # hostname/MAC changed across reimages and left orphan agent rows.
+        client.portal.call(
+            app.state.database.upsert_agent,
+            {**base, "node_id": "node-older", "hostname": "pve-whs", "cpu_percent": 5},
+            "192.168.10.52",
+        )
+        # Make the first row stale so the newer one wins the dedup tie-break.
+        client.portal.call(
+            app.state.database._db().execute,
+            "UPDATE agent_nodes SET last_seen = last_seen - 86400 WHERE node_id = 'node-older'",
+        )
+        client.portal.call(app.state.database._db().commit)
+        client.portal.call(
+            app.state.database.upsert_agent,
+            {**base, "node_id": "node-newer", "hostname": "pve-whs", "cpu_percent": 99},
+            "192.168.10.52",
+        )
+        # A genuinely separate host still appears as its own entry.
+        client.portal.call(
+            app.state.database.upsert_agent,
+            {**base, "node_id": "node-other", "hostname": "other", "cpu_percent": 42},
+            "192.168.10.60",
+        )
+
+        agents = client.get("/api/v1/agents").json()
+        assert agents["total"] == 2
+        node_ids = {item["node_id"] for item in agents["items"]}
+        assert node_ids == {"node-newer", "node-other"}
+        newest = next(item for item in agents["items"] if item["node_id"] == "node-newer")
+        assert newest["cpu_percent"] == 99
+        assert agents["online"] == 2
+
+
 def test_qnap_snmp_details_and_metrics_exclude_credentials_and_serials(tmp_path):
     settings = Settings(
         data_dir=tmp_path,

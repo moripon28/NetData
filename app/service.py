@@ -258,21 +258,41 @@ class MonitorService:
         items = await self.database.devices()
         return [item for item in items if self._is_monitored_ip(item["ip"])]
 
+    @staticmethod
+    def _agent_identity(item: dict[str, Any]) -> str:
+        source_ip = str(item.get("source_ip") or "").strip().lower()
+        if source_ip and source_ip != "unknown":
+            return f"ip:{source_ip}"
+        return f"host:{str(item.get('hostname') or '').strip().lower()}"
+
+    def _dedupe_agents(self, nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        best: dict[str, dict[str, Any]] = {}
+        for item in nodes:
+            key = self._agent_identity(item)
+            current = best.get(key)
+            if current is None or float(item.get("last_seen") or 0) > float(current.get("last_seen") or 0):
+                best[key] = item
+        return sorted(
+            best.values(), key=lambda item: (float(item.get("last_seen") or 0), str(item.get("node_id") or "")), reverse=True
+        )
+
     async def agent_nodes(self) -> list[dict[str, Any]]:
         nodes = await self.database.agents(self.settings.agent_offline_after)
-        return [item for item in nodes if item.get("metadata", {}).get("collection_method") != "prometheus"]
+        filtered = [item for item in nodes if item.get("metadata", {}).get("collection_method") != "prometheus"]
+        return self._dedupe_agents(filtered)
 
     async def exporter_nodes(self) -> list[dict[str, Any]]:
         nodes = await self.database.agents(
             max(self.settings.agent_offline_after, self.settings.prometheus_exporter_interval * 3)
         )
         configured = {target.name for target in self.prometheus.targets}
-        return [
+        filtered = [
             item
             for item in nodes
             if item.get("metadata", {}).get("collection_method") == "prometheus"
             and item.get("metadata", {}).get("target_name") in configured
         ]
+        return self._dedupe_agents(filtered)
 
     async def exporters(self) -> dict[str, Any]:
         payload = dict(self.exporters_latest)
