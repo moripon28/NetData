@@ -8,6 +8,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends iproute2 iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
+RUN groupadd --gid 1000 netpulse \
+    && useradd --uid 1000 --gid netpulse --home-dir /home/netpulse --shell /usr/sbin/nologin netpulse
+
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
@@ -15,7 +18,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY agent ./agent
 RUN chmod -R a+rX /app/app /app/agent \
-    && mkdir -p /data
+    && mkdir -p /data \
+    && chown netpulse:netpulse /data
+
+USER netpulse
 
 EXPOSE 39080
 HEALTHCHECK --interval=20s --timeout=4s --start-period=10s --retries=3 \

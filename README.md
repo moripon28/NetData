@@ -73,7 +73,7 @@ docker compose down
 | `GATEWAY_HOST` | 自動検出 | ルーターのIPアドレス |
 | `NETWORK_INTERFACE` | 自動選択 | 監視するNIC（通常は `eth0`） |
 | `MONITORED_HOSTS` | 空 | 常時確認したいIPをカンマ区切りで指定 |
-| `PUID` / `PGID` | `1000` | データ保存に使うRaspberry PiユーザーのUID/GID |
+| `PUID` / `PGID` | `1000` | 実行するコンテナユーザーのUID/GID（既定の`netpulse`ユーザーに上書き）。`./data` の所有者と合わせ、`id -u` / `id -g` の値を指定 |
 | `SAMPLE_INTERVAL_SECONDS` | `2` | ライブメトリクスの収集間隔 |
 | `DISCOVERY_INTERVAL_SECONDS` | `120` | LAN全体を探索する間隔 |
 | `DEVICE_OFFLINE_AFTER_SECONDS` | `90` | オフラインと判断するまでの秒数 |
