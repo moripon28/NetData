@@ -684,8 +684,11 @@ def _basic_header(username: str, password: str) -> dict[str, str]:
     return {"Authorization": f"Basic {raw}"}
 
 
-def test_web_auth_disabled_by_default_serves_without_credentials(tmp_path):
-    settings = Settings(data_dir=tmp_path, collector_enabled=False, discovery_enabled=False)
+def test_web_auth_serves_without_credentials_when_not_required(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path, collector_enabled=False, discovery_enabled=False,
+        web_auth_required=False,
+    )
     app = create_app(settings)
     with TestClient(app) as client:
         for path in ("/", "/api/v1/snapshot", "/metrics", "/docs", "/openapi.json", "/static/app.js"):
@@ -807,3 +810,23 @@ def test_create_app_rejects_web_auth_user_without_password(tmp_path):
     )
     with pytest.raises(RuntimeError, match="WEB_AUTH_PASSWORD"):
         create_app(settings)
+
+
+def test_create_app_rejects_start_without_credentials_when_auth_required(tmp_path):
+    """The default posture: the LAN-reachable UI/API must never run unauthenticated."""
+    settings = Settings(
+        data_dir=tmp_path, collector_enabled=False, discovery_enabled=False,
+        web_auth_required=True,
+    )
+    with pytest.raises(RuntimeError, match="WEB_AUTH_REQUIRED"):
+        create_app(settings)
+
+
+def test_create_app_starts_without_credentials_when_auth_explicitly_not_required(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path, collector_enabled=False, discovery_enabled=False,
+        web_auth_required=False,
+    )
+    app = create_app(settings)
+    with TestClient(app) as client:
+        assert client.get("/").status_code == 200

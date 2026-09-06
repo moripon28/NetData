@@ -100,8 +100,9 @@ docker compose down
 | `PROMETHEUS_EXPORTER_INTERVAL_SECONDS` | `15` | exporterの収集間隔 |
 | `PROMETHEUS_EXPORTER_TIMEOUT_SECONDS` | `5` | exporter 1台あたりのタイムアウト |
 | `AGENT_TOKEN` | 空 | エージェント署名用のランダム共有鍵 |
-| `WEB_AUTH_USER` | 空 | Basic認証のユーザー名。空のままであればUI/APIは認証なしで動作 |
-| `WEB_AUTH_PASSWORD` | 空 | Basic認証のパスワード。`WEB_AUTH_USER`を設定したら併せて必須 |
+| `WEB_AUTH_USER` | 空 | Basic認証のユーザー名。UI/APIはLAN全体から到達可能なので**必須** |
+| `WEB_AUTH_PASSWORD` | 空 | Basic認証のパスワード。`WEB_AUTH_USER`と併せて必須 |
+| `WEB_AUTH_REQUIRED` | `true` | 認証不足時に起動を拒否するか。ローカル開発で認証なし起動する場合だけ`false` |
 | `ANOMALY_MIN_SAMPLES` | `20` | 各時間帯の学習完了に必要なサンプル数 |
 | `LLM_REPORT_ENABLED` | `false` | ローカルLLMによる定期報告を有効化 |
 | `LLM_BASE_URL` | `http://127.0.0.1:1234/v1` | LM Studio等のOpenAI互換Base URL |
@@ -230,10 +231,10 @@ pip install -r requirements-dev.txt
 python -m pytest
 ```
 
-Windows PowerShellでは有効化コマンドを `.\.venv\Scripts\Activate.ps1` に読み替えてください。デモ表示は `DEMO_MODE=true` と `DATA_DIR=./data` を設定して `uvicorn app.main:app --reload --port 39080` を実行します。
+Windows PowerShellでは有効化コマンドを `.\.venv\Scripts\Activate.ps1` に読み替えてください。デモ表示は `DEMO_MODE=true` と `DATA_DIR=./data`、認証を明示的に無効化するため `WEB_AUTH_REQUIRED=false` を設定して `uvicorn app.main:create_app --factory --reload --port 39080` を実行します。
 
 API仕様は `/docs` で確認できます。主要エンドポイントは `/api/v1/snapshot`、`/api/v1/history`、`/api/v1/traffic`、`/api/v1/connectivity`、`/api/v1/snmp`、`/api/v1/exporters`、`/api/v1/agents`、`/api/v1/events`、`/api/v1/llm/settings`、`/api/v1/llm/models`、`/api/v1/llm/reports`、`/api/v1/llm/flavor-reports`、`/ws/live` です。
 
 ## セキュリティ上の注意
 
-このアプリは信頼できる家庭内LANでの利用を想定し、既定ではログイン機能を持たないまま動作します。UIやAPIをLAN内の他の端末から利用する場合は、任意のHTTP Basic認証を有効にできます。`.env`へ`WEB_AUTH_USER`と`WEB_AUTH_PASSWORD`を設定して再作成すると、Web UI、API、WebSocketがユーザー名とパスワードを要求して起動します。ユーザー名だけを空パスワードで設定することは、推測可能になるため起動時にエラーになります。認証が有効でも`/api/health`、エージェントのインストーラ一式（`/agent/*`）、エージェント署名認証（HMAC）のエンドポイントは認証なしで利用できます。ルーターのポート転送などでインターネットへ直接公開しないでください。外部から見る場合は、VPN（WireGuard/Tailscaleなど）経由にするか、認証付きリバースプロキシを前段に置いてください。
+このアプリは信頼できる家庭内LANでの利用を想定しますが、UI/APIは host ネットワークを使ってLAN全体から到達可能になるため、**既定ではBasic認証が必須**です。これにより、LAN内の他の端末から誰でも設定変更やレポート実行を行えないようになります。`.env`へ`WEB_AUTH_USER`と`WEB_AUTH_PASSWORD`（`openssl rand -base64 24` 等でランダム生成した値）を設定して起動してください。両方が揃っていない（またはユーザー名だけが空パスワード）場合、想定外の一時的な未保護状態を防ぐため起動を拒否します。意図的に認証なしで起動する（ローカル開発など）場合だけ、`WEB_AUTH_REQUIRED=false` を明示してください。認証が有効でも`/api/health`、エージェントのインストーラ一式（`/agent/*`）、エージェント署名認証（HMAC）のエンドポイントは認証なしで利用できます。ルーターのポート転送などでインターネットへ直接公開しないでください。外部から見る場合は、VPN（WireGuard/Tailscaleなど）経由にするか、認証付きリバースプロキシを前段に置いてください。

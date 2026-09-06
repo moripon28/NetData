@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app.config import Settings, validate_agent_token, validate_web_auth
+from app.config import Settings, validate_agent_token, validate_web_auth_configuration
 from app.database import Database
 from app.llm import LLMConnectionError, LLMReporter, ReportInProgressError
 from app.notify import NotificationService
@@ -142,7 +142,7 @@ def build_basic_auth_checker(user: str, password: str):
 def create_app(settings: Settings | None = None) -> FastAPI:
     resolved = settings or Settings()
     validate_agent_token(resolved.agent_token)
-    validate_web_auth(resolved.web_auth_user, resolved.web_auth_password)
+    validate_web_auth_configuration(resolved.web_auth_user, resolved.web_auth_password, resolved.web_auth_required)
     auth_enabled = bool(resolved.web_auth_user)
     check_basic = build_basic_auth_checker(resolved.web_auth_user, resolved.web_auth_password)
     hub = WebSocketHub()
@@ -575,6 +575,3 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(STATIC_DIR / "index.html")
 
     return app
-
-
-app = create_app()

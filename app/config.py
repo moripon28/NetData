@@ -75,16 +75,24 @@ def validate_agent_token(token: str) -> None:
         )
 
 
-def validate_web_auth(user: str, password: str) -> None:
-    """Fail startup when a username is set without a password.
+def validate_web_auth_configuration(user: str, password: str, required: bool) -> None:
+    """Refuse to start with an unsafe or incomplete basic-auth configuration.
 
-    A non-empty ``WEB_AUTH_USER`` with an empty password would let anyone log in
-    with ``user:`` (empty password), so refuse to start instead of running weakly.
+    - A non-empty ``WEB_AUTH_USER`` without a password would let anyone log in
+      with ``user:`` (empty password), so never run that way.
+    - When ``required`` (the default) the UI/API listen on the host network and
+      are reachable by every LAN device, so they must never start unauthenticated.
     """
     if user and not password:
         raise RuntimeError(
             "WEB_AUTH_USERが設定されているのでWEB_AUTH_PASSWORDも設定してください。"
             "パスワードの無いBasic認証は推測可能なため使用できません。"
+        )
+    if required and not (user and password):
+        raise RuntimeError(
+            "UI/APIはLAN全体から到達可能なのでBasic認証を必須としています。"
+            ".envへ\"WEB_AUTH_USER\"と\"WEB_AUTH_PASSWORD\"を設定して再起動してください。"
+            "意図的に認証なしで起動する場合のみ\"WEB_AUTH_REQUIRED=false\"を明示してください。"
         )
 
 
@@ -166,6 +174,7 @@ class Settings:
     notify_allow_external: bool = field(default_factory=lambda: _bool_env("NOTIFY_ALLOW_EXTERNAL", False))
     web_auth_user: str = field(default_factory=lambda: os.getenv("WEB_AUTH_USER", "").strip())
     web_auth_password: str = field(default_factory=lambda: os.getenv("WEB_AUTH_PASSWORD", ""))
+    web_auth_required: bool = field(default_factory=lambda: _bool_env("WEB_AUTH_REQUIRED", True))
 
     @property
     def database_path(self) -> Path:
