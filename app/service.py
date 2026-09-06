@@ -635,7 +635,12 @@ class MonitorService:
     async def _record_event(
         self, severity: str, category: str, title: str, detail: str, metadata: dict[str, Any] | None = None
     ) -> None:
-        await self.database.add_event(severity, category, title, detail, metadata)
+        try:
+            await self.database.add_event(severity, category, title, detail, metadata)
+        except Exception:
+            # Recording must never take the monitoring loop down with it.
+            logger.warning("event recording failed: %s %s", category, title, exc_info=True)
+            return
         if self.notifier is None:
             return
         try:
