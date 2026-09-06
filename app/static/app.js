@@ -48,6 +48,7 @@
     agentSetupClose: $("agentSetupClose"), agentSetupTokenStatus: $("agentSetupTokenStatus"),
     windowsInstallCommand: $("windowsInstallCommand"), linuxInstallCommand: $("linuxInstallCommand"),
     windowsUninstallCommand: $("windowsUninstallCommand"), linuxUninstallCommand: $("linuxUninstallCommand"),
+    windowsUpgradeCommand: $("windowsUpgradeCommand"), linuxUpgradeCommand: $("linuxUpgradeCommand"),
     agentManageButton: $("agentManageButton"), agentManageDialog: $("agentManageDialog"),
     agentManageClose: $("agentManageClose"), agentManageList: $("agentManageList"), agentManageStatus: $("agentManageStatus"),
     agentDeleteDialog: $("agentDeleteDialog"), agentDeleteForm: $("agentDeleteForm"),
@@ -1163,6 +1164,8 @@
     elements.windowsInstallCommand.textContent = `$u='${server}'; $p=Join-Path $env:TEMP 'netpulse-install.ps1'; Invoke-WebRequest "$u/agent/install-windows.ps1" -OutFile $p; powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p -Server $u`;
     elements.linuxInstallCommand.textContent = `curl -fsSL '${server}/agent/install-linux.sh' -o /tmp/netpulse-install.sh && sudo sh /tmp/netpulse-install.sh '${server}'`;
     elements.windowsUninstallCommand.textContent = `$u='${server}'; $p=Join-Path $env:TEMP 'netpulse-uninstall.ps1'; Invoke-WebRequest "$u/agent/uninstall-windows.ps1" -OutFile $p; powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p`;
+    elements.windowsUpgradeCommand.textContent = `$u='${server}'; $p=Join-Path $env:TEMP 'netpulse-upgrade.ps1'; Invoke-WebRequest "$u/agent/upgrade-windows.ps1" -OutFile $p; powershell.exe -NoProfile -ExecutionPolicy Bypass -File $p`;
+    elements.linuxUpgradeCommand.textContent = `curl -fsSL '${server}/agent/upgrade-linux.sh' -o /tmp/netpulse-upgrade.sh && sudo sh /tmp/netpulse-upgrade.sh`;
     elements.linuxUninstallCommand.textContent = `curl -fsSL '${server}/agent/uninstall-linux.sh' -o /tmp/netpulse-uninstall.sh && sudo sh /tmp/netpulse-uninstall.sh`;
     setAgentSetupMode("install");
     elements.agentSetupDialog.showModal();

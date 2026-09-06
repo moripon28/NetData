@@ -19,7 +19,7 @@ from typing import Any
 import psutil
 
 
-VERSION = "0.3.0"
+VERSION = "0.4.0"
 
 
 def stable_node_id() -> str:

@@ -29,6 +29,8 @@ AGENT_DOWNLOADS = {
     "install-linux.sh": "text/plain; charset=utf-8",
     "uninstall-windows.ps1": "text/plain; charset=utf-8",
     "uninstall-linux.sh": "text/plain; charset=utf-8",
+    "upgrade-windows.ps1": "text/plain; charset=utf-8",
+    "upgrade-linux.sh": "text/plain; charset=utf-8",
     "netpulse_agent.py": "text/x-python; charset=utf-8",
     "requirements.txt": "text/plain; charset=utf-8",
 }
