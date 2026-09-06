@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -98,14 +99,17 @@ class WebSocketHub:
         self.clients.discard(websocket)
 
     async def broadcast(self, payload: dict[str, Any]) -> None:
-        disconnected: list[WebSocket] = []
-        for client in tuple(self.clients):
-            try:
-                await client.send_json(payload)
-            except Exception:
-                disconnected.append(client)
-        for client in disconnected:
-            self.disconnect(client)
+        clients = tuple(self.clients)
+        if not clients:
+            return
+
+        async def send(client: WebSocket) -> None:
+            await asyncio.wait_for(client.send_json(payload), timeout=5.0)
+
+        results = await asyncio.gather(*(send(client) for client in clients), return_exceptions=True)
+        for client, result in zip(clients, results):
+            if isinstance(result, BaseException):
+                self.disconnect(client)
 
 
 def build_basic_auth_checker(user: str, password: str):
@@ -215,7 +219,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         return {
-            "status": "ok", "collector": "running" if service._running else "stopped",
+            "status": "ok", "server_time": time.time(),
+            "collector": "running" if service._running else "stopped",
             "latest_sample_at": service.latest.get("generated_at"), "websocket_clients": len(hub.clients),
             "connectivity": service.connectivity_latest.get("status"),
             "snmp": service.snmp_latest.get("status"),
@@ -549,11 +554,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await websocket.close(code=1008, reason="authentication required")
             return
         await hub.connect(websocket)
-        await websocket.send_json(await service.snapshot())
         try:
+            await websocket.send_json(await service.snapshot())
             while True:
                 await websocket.receive_text()
         except WebSocketDisconnect:
+            pass
+        finally:
             hub.disconnect(websocket)
 
     @app.get("/agent/{filename}", include_in_schema=False)

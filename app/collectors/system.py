@@ -13,12 +13,16 @@ class SystemCollector:
         Path("/host/sys/class/thermal/thermal_zone0/temp"),
     )
 
-    def __init__(self) -> None:
+    def __init__(self, disk_path: str | Path = "/") -> None:
+        self.disk_path = str(disk_path)
         self._socket_cache: tuple[float, dict[str, int | None]] | None = None
 
     def collect(self) -> dict[str, Any]:
         memory = psutil.virtual_memory()
-        disk = psutil.disk_usage("/")
+        try:
+            disk = psutil.disk_usage(self.disk_path)
+        except OSError:
+            disk = psutil.disk_usage("/")
         load = psutil.getloadavg() if hasattr(psutil, "getloadavg") else (0.0, 0.0, 0.0)
         socket_counts = self._socket_counts()
         try:

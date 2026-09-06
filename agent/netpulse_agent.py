@@ -67,12 +67,30 @@ def socket_counts() -> dict[str, int | None]:
 
 class Agent:
     def __init__(self, server: str, token: str, interval: int, verify_tls: bool = True) -> None:
-        self.endpoint = server.rstrip("/") + "/api/v1/agent/heartbeat"
+        self.base = server.rstrip("/")
+        self.endpoint = f"{self.base}/api/v1/agent/heartbeat"
         self.token = token.encode("utf-8")
         self.interval = max(5, interval)
         self.verify_tls = verify_tls
         self.node_id = stable_node_id()
         self._previous_network: tuple[float, int, int] | None = None
+        self._clock_offset = 0.0
+
+    def sync_clock(self) -> bool:
+        try:
+            probe = urllib.request.Request(
+                f"{self.base}/api/health", headers={"User-Agent": f"NetPulse-Agent/{VERSION}"}
+            )
+            context = None if self.verify_tls else ssl._create_unverified_context()
+            with urllib.request.urlopen(probe, timeout=5, context=context) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            offset = float(payload["server_time"]) - time.time()
+        except (OSError, ValueError, KeyError):
+            return False
+        if abs(offset) > 86_400:
+            return False
+        self._clock_offset = offset
+        return True
 
     def payload(self) -> dict[str, Any]:
         now = time.monotonic()
@@ -113,9 +131,9 @@ class Agent:
             "metadata": {"architecture": platform.machine(), "python": platform.python_version()},
         }
 
-    def send_once(self) -> None:
+    def send_once(self) -> bool:
         body = json.dumps(self.payload(), separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-        timestamp = str(int(time.time()))
+        timestamp = str(int(time.time() + self._clock_offset))
         signature = hmac.new(self.token, timestamp.encode("ascii") + b"." + body, hashlib.sha256).hexdigest()
         request = urllib.request.Request(
             self.endpoint,
@@ -129,14 +147,33 @@ class Agent:
             },
         )
         context = None if self.verify_tls else ssl._create_unverified_context()
-        with urllib.request.urlopen(request, timeout=10, context=context) as response:
-            if response.status != 200:
-                raise RuntimeError(f"Server returned HTTP {response.status}")
+        try:
+            with urllib.request.urlopen(request, timeout=10, context=context) as response:
+                if response.status != 200:
+                    raise RuntimeError(f"Server returned HTTP {response.status}")
+        except urllib.error.HTTPError as exc:
+            detail = ""
+            try:
+                detail = json.loads(exc.read().decode("utf-8")).get("detail", "")
+            except (OSError, ValueError):
+                pass
+            if exc.code == 401 and "Expired" in detail:
+                return False
+            raise
+        return True
 
     def run(self, once: bool = False) -> int:
+        self.sync_clock()
         while True:
             try:
-                self.send_once()
+                if not self.send_once():
+                    print(
+                        "Heartbeat rejected as expired; resyncing clock from the server.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    if self.sync_clock():
+                        self.send_once()
                 if once:
                     return 0
             except (OSError, urllib.error.URLError, RuntimeError) as exc:

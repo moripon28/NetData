@@ -456,7 +456,19 @@
       }
     }
 
-    const webglReady = setupWebglRenderer();
+    let webglReady = setupWebglRenderer();
+    let webglLost = false;
+    const handleWebglContextLost = (event) => {
+      event.preventDefault();
+      webglLost = true;
+    };
+    const handleWebglContextRestored = () => {
+      webglLost = false;
+      webglReady = setupWebglRenderer();
+      onModeChange?.(webglReady ? "webgl" : "fallback");
+    };
+    canvas.addEventListener("webglcontextlost", handleWebglContextLost);
+    canvas.addEventListener("webglcontextrestored", handleWebglContextRestored);
     onModeChange?.(webglReady ? "webgl" : "fallback");
 
     function dimensions() {
@@ -1053,7 +1065,7 @@
 
     function render(now) {
       const fps = reducedMotion.matches ? Math.min(12, qualitySettings.fps) : qualitySettings.fps;
-      if (!document.hidden && now - lastFrameAt >= 1000 / fps) {
+      if (!webglLost && !document.hidden && now - lastFrameAt >= 1000 / fps) {
         const size = dimensions();
         const scene = buildScene(now, size);
         if (webglReady) drawWebgl(scene, size, now); else drawFallback(scene, size);
@@ -1368,7 +1380,7 @@
       setQuality,
       resetCamera,
       refreshColors,
-      get mode() { return webglReady ? "webgl" : "fallback"; },
+      get mode() { return webglReady && !webglLost ? "webgl" : "fallback"; },
       destroy() {
         window.cancelAnimationFrame(frame);
         interactionSurface.removeEventListener("pointerdown", beginPointerInteraction);
@@ -1378,6 +1390,8 @@
         canvas.removeEventListener("wheel", zoomCamera);
         canvas.removeEventListener("dblclick", resetCamera);
         canvas.removeEventListener("keydown", handleKeyboard);
+        canvas.removeEventListener("webglcontextlost", handleWebglContextLost);
+        canvas.removeEventListener("webglcontextrestored", handleWebglContextRestored);
         labelLayer.removeEventListener("focusin", handleLabelFocus);
         fontSizeObserver.disconnect();
         labelMeta.forEach((meta) => meta.sizeObserver?.disconnect());

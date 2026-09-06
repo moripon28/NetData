@@ -1,10 +1,19 @@
 import inspect
 import re
+import socket as socket_module
 import sys
+
+import httpx
+import pytest
 
 from app.collectors.connectivity import ConnectivityCollector, parse_lan_probe_targets
 from app.collectors.network import TrafficCollector
-from app.collectors.prometheus import PrometheusExporterCollector, parse_exporter_targets, parse_prometheus_text
+from app.collectors.prometheus import (
+    LocalOnlyPinnedTransport,
+    PrometheusExporterCollector,
+    parse_exporter_targets,
+    parse_prometheus_text,
+)
 from app.collectors.snmp import (
     QNAP_STORAGE,
     QNAP_SYSTEM,
@@ -272,6 +281,71 @@ def test_prometheus_exporter_targets_reject_credentials_and_queries():
             pass
         else:
             raise AssertionError(f"unsafe exporter target was accepted: {value}")
+
+
+def test_prometheus_transport_rejects_public_address(monkeypatch):
+    monkeypatch.setattr(
+        socket_module,
+        "getaddrinfo",
+        lambda *a, **k: [(2, 1, 6, "", ("8.8.8.8", 0))],
+    )
+    transport = LocalOnlyPinnedTransport()
+    request = httpx.Request("GET", "http://exporter.lan:9100/metrics")
+    with pytest.raises(ValueError):
+        transport.handle_request(request)
+    transport.close()
+
+
+def test_prometheus_transport_pins_resolved_local_address(monkeypatch):
+    monkeypatch.setattr(
+        socket_module,
+        "getaddrinfo",
+        lambda *a, **k: [(2, 1, 6, "", ("192.168.10.55", 0))],
+    )
+    seen = []
+
+    def inner(request):
+        seen.append(request)
+        return httpx.Response(200, text="")
+
+    transport = LocalOnlyPinnedTransport(httpx.MockTransport(inner))
+    request = httpx.Request("GET", "http://exporter.lan:9100/metrics")
+    transport.handle_request(request)
+    transport.close()
+    (handled,) = seen
+    assert handled.url.host == "192.168.10.55"
+    assert handled.headers["host"] == "exporter.lan:9100"
+
+
+def test_prometheus_transport_ignores_later_dns_answers(monkeypatch):
+    responses = [
+        [(2, 1, 6, "", ("127.0.0.1", 0))],
+        [(2, 1, 6, "", ("8.8.8.8", 0))],
+    ]
+    calls = 0
+
+    def rebinding_dns(*a, **k):
+        nonlocal calls
+        calls += 1
+        return responses[calls - 1] if calls < len(responses) else responses[-1]
+
+    monkeypatch.setattr(socket_module, "getaddrinfo", rebinding_dns)
+    seen = []
+
+    def inner(request):
+        seen.append(request)
+        return httpx.Response(200, text="")
+
+    transport = LocalOnlyPinnedTransport(httpx.MockTransport(inner))
+    try:
+        transport.handle_request(httpx.Request("GET", "http://rebind.evil.example/metrics"))
+    finally:
+        transport.close()
+    (handled,) = seen
+    # The request must go to the first (validated) answer, and a later
+    # re-resolution must never be consulted.
+    assert handled.url.host == "127.0.0.1"
+    assert calls == 1
 
 
 def test_prometheus_windows_exporter_current_metric_names_are_normalized(monkeypatch):

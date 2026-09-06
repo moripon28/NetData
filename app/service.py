@@ -37,7 +37,7 @@ class MonitorService:
         self.database = database
         self.broadcast = broadcast
         self.notifier = notifier
-        self.system = SystemCollector()
+        self.system = SystemCollector(settings.data_dir)
         self.traffic = TrafficCollector(settings.preferred_interface)
         self.discovery = DeviceDiscovery()
         self.gateway = settings.gateway_host or ("192.168.10.1" if settings.demo_mode else self.discovery.detect_gateway())

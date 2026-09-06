@@ -107,6 +107,39 @@ def parse_prometheus_text(text: str) -> dict[str, list[tuple[dict[str, str], flo
     return metrics
 
 
+class LocalOnlyPinnedTransport(httpx.BaseTransport):
+    """Resolves each target at connect time, enforces the local-only policy,
+    and pins the connection to a validated address so a DNS answer that changes
+    between validation and connection (DNS rebinding) cannot redirect the
+    scrape to a non-local target. Mirrors ``LocalOnlyTransport`` in llm.py."""
+
+    def __init__(self, inner: httpx.BaseTransport | None = None) -> None:
+        self._inner = inner or httpx.HTTPTransport()
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        try:
+            addresses = {ipaddress.ip_address(host)}
+        except ValueError:
+            try:
+                addresses = {
+                    ipaddress.ip_address(item[4][0])
+                    for item in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+                }
+            except socket.gaierror as exc:
+                raise ValueError(f"Exporter host cannot be resolved: {host}") from exc
+        if not addresses or any(
+            not (address.is_private or address.is_loopback or address.is_link_local)
+            for address in addresses
+        ):
+            raise ValueError(f"Exporter target must resolve only to a local address: {host}")
+        request.url = request.url.copy_with(host=str(next(iter(addresses))))
+        return self._inner.handle_request(request)
+
+    def close(self) -> None:
+        self._inner.close()
+
+
 class PrometheusExporterCollector:
     """Scrape local node_exporter/windows_exporter endpoints and normalize host metrics."""
 
@@ -120,11 +153,10 @@ class PrometheusExporterCollector:
     def collect(self) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         samples: list[dict[str, Any]] = []
         statuses: list[dict[str, Any]] = []
-        with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
+        with httpx.Client(timeout=self.timeout, follow_redirects=False, transport=LocalOnlyPinnedTransport()) as client:
             for target in self.targets:
                 started = time.monotonic()
                 try:
-                    self._require_local_target(target)
                     response = client.get(target.url, headers={"Accept": "text/plain", "User-Agent": "NetPulse/0.2"})
                     response.raise_for_status()
                     if len(response.content) > self.max_response_bytes:
@@ -152,22 +184,6 @@ class PrometheusExporterCollector:
                         "updated_at": time.time(),
                     })
         return samples, statuses
-
-    @staticmethod
-    def _require_local_target(target: ExporterTarget) -> None:
-        host = target.hostname
-        try:
-            addresses = {ipaddress.ip_address(host)}
-        except ValueError:
-            try:
-                addresses = {
-                    ipaddress.ip_address(item[4][0])
-                    for item in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-                }
-            except socket.gaierror as exc:
-                raise ValueError(f"Exporter host cannot be resolved: {target.name}") from exc
-        if not addresses or any(not (address.is_private or address.is_loopback or address.is_link_local) for address in addresses):
-            raise ValueError(f"Exporter target must resolve only to a local address: {target.name}")
 
     @staticmethod
     def _safe_error(exc: Exception) -> str:
