@@ -1,5 +1,7 @@
 # NetPulse
 
+[English](README.md) | [日本語](README.ja.md)
+
 NetPulseは、Raspberry PiでLAN内の端末や通信状況を監視するWebアプリケーションです。端末の状態や通信量をリアルタイムに表示します。パケットの内容や閲覧履歴は保存しません。
 
 ## 主な機能
