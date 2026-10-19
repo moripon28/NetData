@@ -198,6 +198,10 @@ DEMO_MODE=true DATA_DIR=./data WEB_AUTH_REQUIRED=false uvicorn app.main:create_a
 
 API仕様は `/docs` で確認できます。主なエンドポイントは `/api/v1/snapshot`、`/api/v1/history`、`/api/v1/traffic`、`/api/v1/connectivity`、`/api/v1/snmp`、`/api/v1/exporters`、`/api/v1/agents`、`/api/v1/events`、`/api/v1/llm/reports`、`/ws/live` です。
 
+## ライセンス
+
+本プロジェクトは Mozilla Public License Version 2.0 (MPL-2.0) の下に公開されています。詳細は [LICENSE](LICENSE) を参照してください。
+
 ## セキュリティ
 
 NetPulseは信頼できるLAN内での利用を想定しています。`network_mode: host` を使用するため、UIとAPIにはLAN内の端末から接続できます。

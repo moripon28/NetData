@@ -198,6 +198,10 @@ DEMO_MODE=true DATA_DIR=./data WEB_AUTH_REQUIRED=false uvicorn app.main:create_a
 
 API documentation is available at `/docs`. Main endpoints include `/api/v1/snapshot`, `/api/v1/history`, `/api/v1/traffic`, `/api/v1/connectivity`, `/api/v1/snmp`, `/api/v1/exporters`, `/api/v1/agents`, `/api/v1/events`, `/api/v1/llm/reports`, and `/ws/live`.
 
+## License
+
+This project is licensed under the Mozilla Public License Version 2.0 (MPL-2.0). See the [LICENSE](LICENSE) file for details.
+
 ## Security
 
 NetPulse is intended for use on a trusted LAN. Because it uses `network_mode: host`, devices on the LAN can reach its UI and API.
